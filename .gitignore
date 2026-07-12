@@ -1,0 +1,14 @@
+# Local credentials configuration
+config.js
+
+# Local database file
+data.json
+
+# Node modules
+node_modules/
+package-lock.json
+
+# Logs
+logs/
+*.log
+npm-debug.log*
