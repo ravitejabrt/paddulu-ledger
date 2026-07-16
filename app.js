@@ -2122,7 +2122,7 @@ function openViewDetailsModal(id) {
     entry.debits.forEach((d, idx) => {
       rows += `
         <tr>
-          <td style="font-weight: bold; text-align: center; color: var(--accent-warning);">${idx + 1}</td>
+          <td style="font-weight: bold; text-align: center; color: var(--text-muted);">${idx + 1}</td>
           <td>${formatCurrency(d.amount)}</td>
           <td>${d.date ? formatDisplayDate(d.date) : '-'}</td>
           <td>${d.utr ? escapeHtml(d.utr) : '-'}</td>
@@ -2155,7 +2155,7 @@ function openViewDetailsModal(id) {
     entry.rds.forEach((r, idx) => {
       rows += `
         <tr>
-          <td style="font-weight: bold; text-align: center; color: var(--accent-warning);">${idx + 1}</td>
+          <td style="font-weight: bold; text-align: center; color: var(--text-muted);">${idx + 1}</td>
           <td>${formatCurrency(r.amount)}</td>
           <td>${r.date ? formatDisplayDate(r.date) : '-'}</td>
         </tr>
@@ -2222,7 +2222,7 @@ function openViewDetailsModal(id) {
     <!-- Bill Balance Section -->
     <div class="detail-section">
       <div class="detail-section-title">
-        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        <span style="font-weight: bold; margin-right: 2px;">₹</span>
         Bill Balance & Debits
       </div>
       ${debitsHtml}
@@ -2235,8 +2235,8 @@ function openViewDetailsModal(id) {
 
     <!-- RD Balance Section -->
     <div class="detail-section">
-      <div class="detail-section-title" style="color: var(--accent-warning);">
-        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+      <div class="detail-section-title">
+        <span style="font-weight: bold; margin-right: 2px;">₹</span>
         RD Balance & Details
       </div>
       ${rdsHtml}

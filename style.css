@@ -1449,8 +1449,8 @@ body:not(.authenticated) .login-container {
   margin-bottom: 0.25rem;
   overflow: hidden;
   border-radius: var(--radius-sm);
-  border: 1px solid rgba(239, 68, 68, 0.25);
-  background: rgba(239, 68, 68, 0.03);
+  border: 1px solid var(--border-color);
+  background: rgba(15, 23, 42, 0.2);
 }
 
 .debit-mini-table {
@@ -1462,12 +1462,12 @@ body:not(.authenticated) .login-container {
 .debit-mini-table th, .debit-mini-table td {
   padding: 0.5rem 0.75rem;
   text-align: left;
-  border-bottom: 1px solid rgba(239, 68, 68, 0.12);
+  border-bottom: 1px solid var(--border-color);
 }
 
 .debit-mini-table th {
-  background: rgba(239, 68, 68, 0.1);
-  color: var(--accent-danger);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-secondary);
   font-weight: 700;
   text-transform: uppercase;
   font-size: 0.65rem;
@@ -1639,7 +1639,7 @@ body:not(.authenticated) .login-container {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--accent-purple);
+  color: var(--accent-info);
   margin-bottom: 0.5rem;
   display: flex;
   align-items: center;
