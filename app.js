@@ -271,6 +271,17 @@ function attachSupabaseListeners() {
       localStorage.setItem('paddulu_supabase_key', keyVal);
       supabaseClient = testClient;
 
+      // Save credentials to local config.js via server api (runs on localhost, ignored on hosted static site)
+      try {
+        await fetch('/api/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ supabaseUrl: urlVal, supabaseKey: keyVal })
+        });
+      } catch (err) {
+        // Fails silently when hosted statically on GitHub Pages, which is normal
+      }
+
       showToast('Connected to Supabase database successfully!', 'success');
       closeSupabaseModal();
 
