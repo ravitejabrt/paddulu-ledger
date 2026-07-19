@@ -198,8 +198,96 @@ document.addEventListener('DOMContentLoaded', () => {
   attachSupabaseListeners();
 });
 
-// --- State Methods ---
-// --- State Methods & Supabase Sync ---
+// --- State Methods & Cryptography ---
+
+// --- Cryptography Helpers (AES-GCM + PBKDF2) ---
+
+async function sha256(message) {
+  const msgBuffer = new TextEncoder().encode(message);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function deriveKey(password, salt) {
+  const enc = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(password),
+    { name: "PBKDF2" },
+    false,
+    ["deriveKey"]
+  );
+  return crypto.subtle.deriveKey(
+    {
+      name: "PBKDF2",
+      salt: salt,
+      iterations: 100000,
+      hash: "SHA-256"
+    },
+    keyMaterial,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
+async function encryptData(plaintext, password) {
+  if (!plaintext) return '';
+  try {
+    const enc = new TextEncoder();
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const key = await deriveKey(password, salt);
+    const encrypted = await crypto.subtle.encrypt(
+      { name: "AES-GCM", iv: iv },
+      key,
+      enc.encode(plaintext)
+    );
+    
+    const combined = new Uint8Array(salt.length + iv.length + encrypted.byteLength);
+    combined.set(salt, 0);
+    combined.set(iv, salt.length);
+    combined.set(new Uint8Array(encrypted), salt.length + iv.length);
+    
+    let binary = '';
+    const len = combined.byteLength;
+    for (let i = 0; i < len; i++) {
+      binary += String.fromCharCode(combined[i]);
+    }
+    return btoa(binary);
+  } catch (err) {
+    console.error("Encryption failed:", err);
+    return '';
+  }
+}
+
+async function decryptData(ciphertextBase64, password) {
+  if (!ciphertextBase64) return '';
+  try {
+    const dec = new TextDecoder();
+    const binaryStr = atob(ciphertextBase64);
+    const combined = new Uint8Array(binaryStr.length);
+    for (let i = 0; i < binaryStr.length; i++) {
+      combined[i] = binaryStr.charCodeAt(i);
+    }
+    
+    const salt = combined.slice(0, 16);
+    const iv = combined.slice(16, 28);
+    const ciphertext = combined.slice(28);
+    
+    const key = await deriveKey(password, salt);
+    const decrypted = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: iv },
+      key,
+      ciphertext
+    );
+    return dec.decode(decrypted);
+  } catch (err) {
+    console.error("Decryption failed:", err);
+    return '';
+  }
+}
 
 function initSupabase() {
   let url = window.SUPABASE_URL || localStorage.getItem('paddulu_supabase_url');
@@ -271,12 +359,19 @@ function attachSupabaseListeners() {
       localStorage.setItem('paddulu_supabase_key', keyVal);
       supabaseClient = testClient;
 
+      // Encrypt credentials using the standard key "1989" to safely store in public config.js
+      const encryptedUrl = await encryptData(urlVal, "1989");
+      const encryptedKey = await encryptData(keyVal, "1989");
+
       // Save credentials to local config.js via server api (runs on localhost, ignored on hosted static site)
       try {
         await fetch('/api/config', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ supabaseUrl: urlVal, supabaseKey: keyVal })
+          body: JSON.stringify({
+            encryptedUrl: encryptedUrl,
+            encryptedKey: encryptedKey
+          })
         });
       } catch (err) {
         // Fails silently when hosted statically on GitHub Pages, which is normal
@@ -1362,52 +1457,67 @@ function attachAuthListeners() {
       return;
     }
 
-    // Default Credentials check: User ID "BRT" and Password "1989"
-    if (userIdInput === 'BRT' && passwordInput === '1989') {
-      // Success auth
-      sessionStorage.setItem('paddulu_auth_logged_in', 'true');
-      
-      if (dom.loginRemember.checked) {
-        localStorage.setItem('paddulu_auth_logged_in', 'true');
-        localStorage.setItem('paddulu_auth_remember', 'true');
+    // Verify credentials hash: User ID "BRT" and Password "1989" (sha256 = 9113b98...)
+    sha256(passwordInput).then(async (inputHash) => {
+      if (userIdInput === 'BRT' && inputHash === '9113b98df80f877c7a2ee5d865a04c9514b4e9bf25a49d315b0b15f115d2f0d2') {
+        // Success auth
+        sessionStorage.setItem('paddulu_auth_logged_in', 'true');
+        
+        if (dom.loginRemember.checked) {
+          localStorage.setItem('paddulu_auth_logged_in', 'true');
+          localStorage.setItem('paddulu_auth_remember', 'true');
+        } else {
+          localStorage.removeItem('paddulu_auth_logged_in');
+          localStorage.removeItem('paddulu_auth_remember');
+        }
+
+        // Try decrypting credentials with entered password on new device login
+        if (window.SUPABASE_URL_ENCRYPTED && window.SUPABASE_ANON_KEY_ENCRYPTED) {
+          const decUrl = await decryptData(window.SUPABASE_URL_ENCRYPTED, passwordInput);
+          const decKey = await decryptData(window.SUPABASE_ANON_KEY_ENCRYPTED, passwordInput);
+          if (decUrl && decKey) {
+            localStorage.setItem('paddulu_supabase_url', decUrl);
+            localStorage.setItem('paddulu_supabase_key', decKey);
+            initSupabase();
+          }
+        }
+
+        document.body.classList.add('authenticated');
+        
+        // Load and render app dashboard
+        loadLedgerEntries().then(() => {
+          renderApp();
+        });
+
+        // Show success toast
+        showToast('Welcome to BRT Paddulu Ledger. Sign in successful!', 'success');
+
+        // Clear input fields
+        dom.loginId.value = '';
+        dom.loginPassword.value = '';
+        dom.loginRemember.checked = false;
+        dom.loginPassword.type = 'password';
+        dom.btnTogglePassword.querySelector('.eye-open').style.display = 'block';
+        dom.btnTogglePassword.querySelector('.eye-closed').style.display = 'none';
+        clearErrors(dom.loginForm);
+
       } else {
-        localStorage.removeItem('paddulu_auth_logged_in');
-        localStorage.removeItem('paddulu_auth_remember');
+        // Failed auth
+        triggerLoginShake();
+        showToast('Access Denied: Invalid User ID or Password.', 'error');
       }
-
-      document.body.classList.add('authenticated');
-      
-      // Load and render app dashboard
-      loadLedgerEntries().then(() => {
-        renderApp();
-      });
-
-      // Show success toast
-      showToast('Welcome to Paddulu Ledger. Sign in successful!', 'success');
-
-      // Clear input fields
-      dom.loginId.value = '';
-      dom.loginPassword.value = '';
-      dom.loginRemember.checked = false;
-      dom.loginPassword.type = 'password';
-      dom.btnTogglePassword.querySelector('.eye-open').style.display = 'block';
-      dom.btnTogglePassword.querySelector('.eye-closed').style.display = 'none';
-      clearErrors(dom.loginForm);
-
-    } else {
-      // Failed auth
-      triggerLoginShake();
-      showToast('Access Denied: Invalid User ID or Password.', 'error');
-    }
+    });
   });
 
   // Handle Logout button click
   dom.btnLogout.addEventListener('click', () => {
-    if (confirm('Are you sure you want to log out from Paddulu Ledger?')) {
+    if (confirm('Are you sure you want to log out from BRT Paddulu Ledger?')) {
       // Clear session & localStorage flags
       sessionStorage.removeItem('paddulu_auth_logged_in');
       localStorage.removeItem('paddulu_auth_logged_in');
       localStorage.removeItem('paddulu_auth_remember');
+      localStorage.removeItem('paddulu_supabase_url');
+      localStorage.removeItem('paddulu_supabase_key');
 
       // Clear layout
       document.body.classList.remove('authenticated');
