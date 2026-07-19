@@ -652,6 +652,21 @@ tr:hover {
   background-color: rgba(255, 255, 255, 0.02);
 }
 
+/* Settled/Zero Balance Rows */
+tr.row-zero-balance {
+  background-color: rgba(148, 163, 184, 0.02) !important;
+  opacity: 0.55;
+}
+tr.row-zero-balance:hover {
+  opacity: 0.85;
+}
+tr.row-zero-balance td {
+  color: #94a3b8 !important;
+}
+tr.row-zero-balance td.td-total {
+  color: #64748b !important;
+}
+
 tr:last-child td {
   border-bottom: none;
 }

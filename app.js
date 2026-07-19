@@ -391,6 +391,13 @@ function attachSupabaseListeners() {
 }
 
 function mapRowToEntry(row) {
+  const billAmount = parseFloat(row.bill_amount) || 0;
+  const rdAmount = parseFloat(row.rd_amount) || 0;
+  const debits = row.debits || [];
+  const rds = row.rds || [];
+  const debitAmount = debits.reduce((sum, d) => sum + d.amount, 0) || (parseFloat(row.debit_amount) || 0);
+  const rdDetailsAmount = rds.reduce((sum, r) => sum + r.amount, 0);
+
   return {
     id: row.id,
     date: row.date,
@@ -399,14 +406,14 @@ function mapRowToEntry(row) {
     phone: row.phone || '',
     coldName: row.cold_name || '',
     bags: parseInt(row.bags) || 0,
-    billAmount: parseFloat(row.bill_amount) || 0,
-    rdAmount: parseFloat(row.rd_amount) || 0,
-    debitAmount: parseFloat(row.debit_amount) || 0,
-    debits: row.debits || [],
-    rds: row.rds || [],
+    billAmount: billAmount,
+    rdAmount: rdAmount,
+    debitAmount: debitAmount,
+    debits: debits,
+    rds: rds,
     bankAccount: row.bank_account || '',
     bankIfsc: row.bank_ifsc || '',
-    totalAmount: parseFloat(row.total_amount) || 0
+    totalAmount: (billAmount - debitAmount) + (rdAmount - rdDetailsAmount)
   };
 }
 
@@ -484,6 +491,30 @@ async function loadLedgerEntries() {
         }
       }
     }
+
+    // Perform thorough data sanitization and recalculation of totalAmount
+    entries.forEach(entry => {
+      // Ensure debits list format
+      if (!entry.debits) entry.debits = [];
+      if (entry.debits.length === 0 && entry.debitAmount > 0) {
+        entry.debits = [{
+          id: 'legacy-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4),
+          amount: entry.debitAmount,
+          date: entry.debitDate || '',
+          utr: entry.debitUtr || ''
+        }];
+      }
+      
+      // Calculate debitAmount from debits array
+      entry.debitAmount = entry.debits.reduce((sum, d) => sum + d.amount, 0);
+
+      // Ensure rds list format
+      if (!entry.rds) entry.rds = [];
+      entry.rdDetailsAmount = entry.rds.reduce((sum, r) => sum + r.amount, 0);
+
+      // Recalculate net total
+      entry.totalAmount = (entry.billAmount - entry.debitAmount) + (entry.rdAmount - entry.rdDetailsAmount);
+    });
 
     ledgerEntries = entries;
   } catch (error) {
@@ -946,6 +977,9 @@ function renderApp() {
     const isLocked = Math.abs(entry.totalAmount) < 0.01;
 
     const row = document.createElement('tr');
+    if (isLocked) {
+      row.classList.add('row-zero-balance');
+    }
     row.innerHTML = `
       <td style="text-align: center; vertical-align: middle;"><input type="checkbox" class="entry-checkbox" data-id="${entry.id}" ${selectedEntryIds.has(entry.id) ? 'checked' : ''} style="cursor: pointer; transform: scale(1.15);"></td>
       <td>${formatDisplayDate(entry.date)}</td>
@@ -1086,6 +1120,13 @@ function getSortedEntries(entries) {
   const modifier = direction === 'asc' ? 1 : -1;
 
   return [...entries].sort((a, b) => {
+    const isZeroA = Math.abs(a.totalAmount) < 0.01;
+    const isZeroB = Math.abs(b.totalAmount) < 0.01;
+
+    // Zero-balance (settled) rows always go to the bottom
+    if (isZeroA && !isZeroB) return 1;
+    if (!isZeroA && isZeroB) return -1;
+
     let result = 0;
     if (column === 'date') {
       result = a.date.localeCompare(b.date) * modifier;
@@ -1259,7 +1300,7 @@ function formatCurrency(amount) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   }).format(amount);
-  return `₹ ${formatted}`;
+  return `₹  ${formatted}`;
 }
 
 /**
@@ -1755,6 +1796,19 @@ function openDebitPopup(formType, debitIdToEdit = null) {
     dom.popupDebitDate.value = new Date().toISOString().split('T')[0];
   }
 
+  // Calculate and display current remaining bill balance
+  const billAmount = parseFloat(dom.editBill.value) || 0;
+  const currentDebitId = debitIdToEdit;
+  const otherDebitsSum = tempEditDebits
+    .filter(d => d.id !== currentDebitId)
+    .reduce((sum, d) => sum + d.amount, 0);
+  const remainingBill = billAmount - otherDebitsSum;
+
+  const infoEl = document.getElementById('debit-modal-balance-info');
+  if (infoEl) {
+    infoEl.textContent = `(Bill Balance: ${formatCurrency(remainingBill)})`;
+  }
+
   dom.debitModal.showModal();
 }
 
@@ -2013,6 +2067,19 @@ function openRdPopup(formType, rdIdToEdit = null) {
   } else {
     dom.rdPopupForm.reset();
     dom.popupRdDate.value = new Date().toISOString().split('T')[0];
+  }
+
+  // Calculate and display current remaining RD balance
+  const rdAmount = parseFloat(dom.editRd.value) || 0;
+  const currentRdId = rdIdToEdit;
+  const otherRdsSum = tempEditRds
+    .filter(r => r.id !== currentRdId)
+    .reduce((sum, r) => sum + r.amount, 0);
+  const remainingRd = rdAmount - otherRdsSum;
+
+  const infoEl = document.getElementById('rd-modal-balance-info');
+  if (infoEl) {
+    infoEl.textContent = `(RD Balance: ${formatCurrency(remainingRd)})`;
   }
 
   dom.rdModal.showModal();
