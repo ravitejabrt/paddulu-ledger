@@ -19,6 +19,7 @@ let selectedEntryIds = new Set();
 let tempAddBank = { account: '', ifsc: '' };
 let tempEditBank = { account: '', ifsc: '' };
 let activeBankFormType = 'add'; // 'add' or 'edit'
+let isPromptingRegister = false;
 
 // --- DOM Elements ---
 const dom = {
@@ -159,8 +160,34 @@ const dom = {
   btnSupabaseModalCancel: document.getElementById('btn-supabase-modal-cancel'),
   supabaseConfigForm: document.getElementById('supabase-config-form'),
   popupSupabaseUrl: document.getElementById('popup-supabase-url'),
-  popupSupabaseKey: document.getElementById('popup-supabase-key')
+  popupSupabaseKey: document.getElementById('popup-supabase-key'),
+
+  // Commission Agent Modal Elements
+  btnTriggerAddAgent: document.getElementById('btn-trigger-add-agent'),
+  addAgentModal: document.getElementById('add-agent-modal'),
+  btnAddAgentClose: document.getElementById('btn-add-agent-close'),
+  btnAgentCancel: document.getElementById('btn-agent-cancel'),
+  agentForm: document.getElementById('agent-form'),
+  agentName: document.getElementById('agent-name'),
+  agentFirm: document.getElementById('agent-firm'),
+  agentPhone: document.getElementById('agent-phone'),
+  agentBankAccount: document.getElementById('agent-bank-account'),
+  agentBankIfsc: document.getElementById('agent-bank-ifsc'),
+  agentSuggestions: document.getElementById('agent-suggestions'),
+
+  // Commission Agent Directory Elements
+  viewAgentsModal: document.getElementById('view-agents-modal'),
+  btnViewAgentsClose: document.getElementById('btn-view-agents-close'),
+  btnAddAgentTriggerInside: document.getElementById('btn-add-agent-trigger-inside'),
+  agentsListBody: document.getElementById('agents-list-body'),
+
+  // Custom Autocomplete Search Dropdowns
+  inputNameDropdown: document.getElementById('input-name-dropdown'),
+  editNameDropdown: document.getElementById('edit-name-dropdown')
 };
+
+// --- Additional Global State ---
+let commissionAgents = [];
 
 // --- Initialization ---
 document.addEventListener('DOMContentLoaded', () => {
@@ -174,8 +201,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const today = new Date().toISOString().split('T')[0];
   dom.inputDate.value = today;
 
-  // Load entries from database
-  loadLedgerEntries().then(() => {
+  // Load entries and agents from database
+  Promise.all([loadLedgerEntries(), loadCommissionAgents()]).then(() => {
     // Initial render
     if (isAuthenticated()) {
       renderApp();
@@ -185,6 +212,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Attach Event Listeners
   attachFormListeners();
   attachAddEntryModalListeners();
+  attachAddAgentModalListeners();
   attachFilterListeners();
   attachTableListeners();
   attachModalListeners();
@@ -525,6 +553,97 @@ async function loadLedgerEntries() {
   }
 }
 
+async function loadCommissionAgents() {
+  let agents = [];
+  
+  // 1. Try to load from local server /api/agents
+  try {
+    const response = await fetch('/api/agents');
+    if (response.ok) {
+      agents = await response.json();
+    }
+  } catch (err) {
+    console.log('No local server database found (expected in production).');
+  }
+
+  // 2. Try local browser storage if empty
+  if (agents.length === 0) {
+    const localAgents = localStorage.getItem('commission_agents');
+    if (localAgents) {
+      try {
+        agents = JSON.parse(localAgents);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  }
+
+  // 3. Try to load from Supabase if connected
+  if (supabaseClient) {
+    try {
+      const { data, error } = await supabaseClient.from('commission_agents').select('*');
+      if (!error && data && data.length > 0) {
+        agents = data.map(row => ({
+          name: row.name,
+          firmName: row.firm_name,
+          phone: row.phone,
+          bankAccount: row.bank_account,
+          bankIfsc: row.bank_ifsc
+        }));
+      }
+    } catch (e) {
+      console.warn("Supabase commission_agents table not found. Storing locally.");
+    }
+  }
+
+  commissionAgents = agents || [];
+  populateAgentSuggestions();
+}
+
+async function saveCommissionAgents() {
+  // 1. Save to local browser storage
+  localStorage.setItem('commission_agents', JSON.stringify(commissionAgents));
+
+  // 2. Save to local server /api/agents
+  try {
+    await fetch('/api/agents', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(commissionAgents)
+    });
+  } catch (error) {
+    // Ignore fail since it is expected when deployed to GitHub Pages
+  }
+
+  // 3. Save to Supabase if connected
+  if (supabaseClient) {
+    try {
+      const rows = commissionAgents.map(a => ({
+        name: a.name,
+        firm_name: a.firmName,
+        phone: a.phone,
+        bank_account: a.bankAccount,
+        bank_ifsc: a.bankIfsc
+      }));
+      await supabaseClient.from('commission_agents').upsert(rows);
+    } catch (e) {
+      console.warn("Supabase commission_agents table sync failed. Storing locally.");
+    }
+  }
+
+  populateAgentSuggestions();
+}
+
+function populateAgentSuggestions() {
+  if (!dom.agentSuggestions) return;
+  dom.agentSuggestions.innerHTML = '';
+  commissionAgents.forEach(agent => {
+    const option = document.createElement('option');
+    option.value = agent.name;
+    dom.agentSuggestions.appendChild(option);
+  });
+}
+
 async function saveLedgerEntries() {
   // Sync to local server file backup if running locally (server.js running)
   try {
@@ -644,6 +763,93 @@ function attachFormListeners() {
     updateBankSummary('add');
     clearErrors(dom.form);
   });
+
+  // Initialize Custom Autocomplete Search Dropdowns
+  const initCustomSearchDropdown = (inputEl, dropdownEl, firmEl, phoneEl, type) => {
+    const renderDropdownList = (filterText) => {
+      dropdownEl.innerHTML = '';
+      const query = filterText.toLowerCase().trim();
+      const filteredAgents = commissionAgents.filter(a => a.name.toLowerCase().includes(query));
+
+      if (filteredAgents.length === 0) {
+        dropdownEl.innerHTML = '<div class="custom-search-dropdown-empty">No matching agent found</div>';
+        return;
+      }
+
+      filteredAgents.forEach(agent => {
+        const item = document.createElement('div');
+        item.className = 'custom-search-dropdown-item';
+        item.textContent = agent.name;
+        item.addEventListener('click', (e) => {
+          e.stopPropagation();
+          inputEl.value = agent.name;
+          dropdownEl.style.display = 'none';
+
+          firmEl.value = agent.firmName || '';
+          phoneEl.value = agent.phone || '';
+          if (type === 'add') {
+            tempAddBank = { account: agent.bankAccount || '', ifsc: agent.bankIfsc || '' };
+            updateBankSummary('add');
+          } else {
+            tempEditBank = { account: agent.bankAccount || '', ifsc: agent.bankIfsc || '' };
+            updateBankSummary('edit');
+          }
+          showToast(`Auto-filled details for agent "${agent.name}"`, 'success');
+        });
+        dropdownEl.appendChild(item);
+      });
+    };
+
+    // Show on focus/click
+    inputEl.addEventListener('focus', () => {
+      renderDropdownList(inputEl.value);
+      dropdownEl.style.display = 'block';
+    });
+    inputEl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      renderDropdownList(inputEl.value);
+      dropdownEl.style.display = 'block';
+    });
+
+    // Filter on input
+    inputEl.addEventListener('input', () => {
+      renderDropdownList(inputEl.value);
+      
+      // Still auto-fill if they typed the name exactly
+      const selectedName = inputEl.value.trim();
+      const matchedAgent = commissionAgents.find(a => a.name.toLowerCase() === selectedName.toLowerCase());
+      if (matchedAgent) {
+        firmEl.value = matchedAgent.firmName || '';
+        phoneEl.value = matchedAgent.phone || '';
+        if (type === 'add') {
+          tempAddBank = { account: matchedAgent.bankAccount || '', ifsc: matchedAgent.bankIfsc || '' };
+          updateBankSummary('add');
+        } else {
+          tempEditBank = { account: matchedAgent.bankAccount || '', ifsc: matchedAgent.bankIfsc || '' };
+          updateBankSummary('edit');
+        }
+      }
+    });
+
+    // Close on blur check redirect
+    inputEl.addEventListener('change', () => {
+      checkAndPromptRegister(inputEl, inputEl.value.trim());
+    });
+
+    // Document click closer helper
+    document.addEventListener('click', (e) => {
+      if (e.target !== inputEl && e.target !== dropdownEl && !dropdownEl.contains(e.target)) {
+        dropdownEl.style.display = 'none';
+      }
+    });
+  };
+
+  if (dom.inputName && dom.inputNameDropdown) {
+    initCustomSearchDropdown(dom.inputName, dom.inputNameDropdown, dom.inputFirm, dom.inputPhone, 'add');
+  }
+  if (dom.editName && dom.editNameDropdown) {
+    initCustomSearchDropdown(dom.editName, dom.editNameDropdown, dom.editFirm, dom.editPhone, 'edit');
+  }
 }
 
 function attachAddEntryModalListeners() {
@@ -684,6 +890,153 @@ function attachAddEntryModalListeners() {
   dom.addEntryModal.addEventListener('click', (e) => {
     if (e.target === dom.addEntryModal) {
       dom.addEntryModal.close();
+    }
+  });
+}
+
+function renderAgentsDirectory() {
+  if (!dom.agentsListBody) return;
+  dom.agentsListBody.innerHTML = '';
+
+  if (commissionAgents.length === 0) {
+    dom.agentsListBody.innerHTML = `
+      <tr>
+        <td colspan="5" style="text-align: center; color: var(--text-secondary); padding: 1.5rem;">
+          No commission agents registered yet. Click "+ Add New Agent" above to add one.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  commissionAgents.forEach((agent, idx) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="padding: 0.5rem; color: var(--text-primary); font-weight: 500;">${agent.name}</td>
+      <td style="padding: 0.5rem; color: var(--text-secondary);">${agent.firmName || '-'}</td>
+      <td style="padding: 0.5rem; color: var(--text-secondary);">${agent.phone || '-'}</td>
+      <td style="padding: 0.5rem; color: var(--text-secondary);">
+        <div style="font-size: 0.72rem;">A/C: ${agent.bankAccount || '-'}</div>
+        <div style="font-size: 0.72rem; opacity: 0.8;">IFSC: ${agent.bankIfsc || '-'}</div>
+      </td>
+      <td style="padding: 0.5rem; text-align: center;">
+        <button type="button" class="btn-delete-agent" data-idx="${idx}" title="Delete Agent" style="background: transparent; border: none; color: var(--accent-danger); cursor: pointer; padding: 0.25rem;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+        </button>
+      </td>
+    `;
+    dom.agentsListBody.appendChild(tr);
+  });
+
+  // Attach delete click listeners
+  dom.agentsListBody.querySelectorAll('.btn-delete-agent').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const idx = parseInt(btn.getAttribute('data-idx'), 10);
+      const agent = commissionAgents[idx];
+      if (confirm(`Are you sure you want to delete Commission Agent "${agent.name}"?`)) {
+        commissionAgents.splice(idx, 1);
+        await saveCommissionAgents();
+        showToast(`Commission Agent "${agent.name}" deleted successfully.`, 'info');
+        renderAgentsDirectory();
+      }
+    });
+  });
+}
+
+function attachAddAgentModalListeners() {
+  if (!dom.btnTriggerAddAgent || !dom.addAgentModal || !dom.viewAgentsModal) return;
+
+  // Open View Directory Modal
+  dom.btnTriggerAddAgent.addEventListener('click', () => {
+    renderAgentsDirectory();
+    dom.viewAgentsModal.showModal();
+  });
+
+  // Close View Directory Modal
+  if (dom.btnViewAgentsClose) {
+    dom.btnViewAgentsClose.addEventListener('click', () => {
+      dom.viewAgentsModal.close();
+    });
+  }
+
+  dom.viewAgentsModal.addEventListener('click', (e) => {
+    if (e.target === dom.viewAgentsModal) {
+      dom.viewAgentsModal.close();
+    }
+  });
+
+  // Click "+ Add New Agent" inside directory
+  if (dom.btnAddAgentTriggerInside) {
+    dom.btnAddAgentTriggerInside.addEventListener('click', () => {
+      dom.viewAgentsModal.close();
+      dom.agentName.value = '';
+      dom.agentFirm.value = '';
+      dom.agentPhone.value = '';
+      dom.agentBankAccount.value = '';
+      dom.agentBankIfsc.value = '';
+      clearErrors(dom.agentForm);
+      dom.addAgentModal.showModal();
+    });
+  }
+
+  // Close Add Modal with close button
+  if (dom.btnAddAgentClose) {
+    dom.btnAddAgentClose.addEventListener('click', () => {
+      dom.addAgentModal.close();
+      renderAgentsDirectory();
+      dom.viewAgentsModal.showModal();
+    });
+  }
+
+  // Cancel button inside form should close add modal and reopen directory list
+  if (dom.btnAgentCancel) {
+    dom.btnAgentCancel.addEventListener('click', () => {
+      dom.addAgentModal.close();
+      renderAgentsDirectory();
+      dom.viewAgentsModal.showModal();
+    });
+  }
+
+  // Handle outside add modal click to close and reopen directory
+  dom.addAgentModal.addEventListener('click', (e) => {
+    if (e.target === dom.addAgentModal) {
+      dom.addAgentModal.close();
+      renderAgentsDirectory();
+      dom.viewAgentsModal.showModal();
+    }
+  });
+
+  // Agent Form Submit
+  dom.agentForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (validateForm(dom.agentForm)) {
+      const nameVal = dom.agentName.value.trim();
+      const firmVal = dom.agentFirm.value.trim();
+      const phoneVal = dom.agentPhone.value.trim();
+      const accountVal = dom.agentBankAccount.value.trim();
+      const ifscVal = dom.agentBankIfsc.value.trim();
+
+      // Check if already exists (by case-insensitive name)
+      const existingIdx = commissionAgents.findIndex(a => a.name.toLowerCase() === nameVal.toLowerCase());
+      const newAgent = {
+        name: nameVal,
+        firmName: firmVal,
+        phone: phoneVal,
+        bankAccount: accountVal,
+        bankIfsc: ifscVal
+      };
+
+      if (existingIdx !== -1) {
+        commissionAgents[existingIdx] = newAgent;
+      } else {
+        commissionAgents.push(newAgent);
+      }
+
+      await saveCommissionAgents();
+      showToast(`Commission Agent "${nameVal}" saved successfully!`, 'success');
+      dom.addAgentModal.close();
+      renderAgentsDirectory();
+      dom.viewAgentsModal.showModal();
     }
   });
 }
@@ -1246,6 +1599,36 @@ function deleteEntry(id) {
   }
 }
 
+function checkAndPromptRegister(inputEl, value) {
+  if (isPromptingRegister) return;
+  if (!value) return;
+
+  const matched = commissionAgents.some(a => a.name.toLowerCase() === value.toLowerCase());
+  if (!matched) {
+    isPromptingRegister = true;
+    setTimeout(() => {
+      if (confirm(`Customer "${value}" is not registered as a Commission Agent.\n\nWould you like to register them now?`)) {
+        // Close active modal
+        const activeModal = inputEl.closest('dialog');
+        if (activeModal) activeModal.close();
+        
+        // Open agent modal and pre-fill name
+        dom.agentName.value = value;
+        dom.agentFirm.value = '';
+        dom.agentPhone.value = '';
+        dom.agentBankAccount.value = '';
+        dom.agentBankIfsc.value = '';
+        clearErrors(dom.agentForm);
+        dom.addAgentModal.showModal();
+      } else {
+        // Clear input on cancel
+        inputEl.value = '';
+      }
+      isPromptingRegister = false;
+    }, 100);
+  }
+}
+
 // --- Form Validation Helpers ---
 
 function validateForm(formElement) {
@@ -1265,6 +1648,16 @@ function validateForm(formElement) {
 
     if (value) {
       const idStr = input.id.toLowerCase();
+      
+      // Customer name validation (must match a registered agent)
+      if (input.id === 'input-name' || input.id === 'edit-name') {
+        const matched = commissionAgents.some(a => a.name.toLowerCase() === value.toLowerCase());
+        if (!matched) {
+          setError(input, 'Customer must be a registered Commission Agent');
+          isValid = false;
+          checkAndPromptRegister(input, value);
+        }
+      }
       
       // Phone validation (only digits, exactly 10 digits)
       if (input.type === 'tel' || idStr.includes('phone')) {
