@@ -7,7 +7,7 @@
 // --- Global State ---
 let supabaseClient = null;
 let ledgerEntries = [];
-let currentSort = { column: 'date', direction: 'desc' };
+let currentSort = { column: 'lastEdited', direction: 'desc' };
 let selectedCalendarDate = null;
 let calendarViewDate = new Date();
 let tempEditDebits = [];
@@ -414,7 +414,8 @@ function mapRowToEntry(row) {
     rds: rds,
     bankAccount: row.bank_account || '',
     bankIfsc: row.bank_ifsc || '',
-    totalAmount: (billAmount - debitAmount) + (rdAmount - rdDetailsAmount)
+    totalAmount: (billAmount - debitAmount) + (rdAmount - rdDetailsAmount),
+    updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : (row.updatedAt || parseFloat(row.id) || Date.now())
   };
 }
 
@@ -604,13 +605,14 @@ function attachFormListeners() {
         debits: [],
         bankAccount: tempAddBank.account,
         bankIfsc: tempAddBank.ifsc,
-        totalAmount: billVal + rdVal
+        totalAmount: billVal + rdVal,
+        updatedAt: Date.now()
       };
 
       ledgerEntries.push(entry);
       saveLedgerEntries();
       saveSupabaseEntry(entry);
-      currentSort = { column: 'date', direction: 'desc' };
+      currentSort = { column: 'lastEdited', direction: 'desc' };
       renderApp();
 
       // Reset Form fields (keep date as is for ease of sequential entry)
@@ -717,13 +719,16 @@ function attachTableListeners() {
   // Column Sorting
   dom.tableHeaders.forEach(th => {
     th.addEventListener('click', () => {
-      const column = th.dataset.sort;
+      let column = th.dataset.sort;
+      if (column === 'date') {
+        column = 'lastEdited';
+      }
+      
       if (currentSort.column === column) {
-        // Toggle direction
         currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
       } else {
         currentSort.column = column;
-        currentSort.direction = 'asc';
+        currentSort.direction = 'desc'; // default to desc for date/lastEdited
       }
       renderApp();
     });
@@ -847,12 +852,13 @@ function attachModalListeners() {
           debitUtr: debitUtrVal,
           bankAccount: tempEditBank.account,
           bankIfsc: tempEditBank.ifsc,
-          totalAmount: (billVal - debitVal) + (rdVal - rdDetailVal)
+          totalAmount: (billVal - debitVal) + (rdVal - rdDetailVal),
+          updatedAt: Date.now()
         };
 
         saveLedgerEntries();
         saveSupabaseEntry(ledgerEntries[index]);
-        currentSort = { column: 'date', direction: 'desc' };
+        currentSort = { column: 'lastEdited', direction: 'desc' };
         renderApp();
         closeModal();
         showToast('Ledger entry updated successfully!', 'success');
@@ -1071,7 +1077,8 @@ function updateMetricsDashboard(entries) {
 function updateTableHeaderIndicators() {
   dom.tableHeaders.forEach(th => {
     th.classList.remove('sort-asc', 'sort-desc');
-    if (th.dataset.sort === currentSort.column) {
+    const activeCol = currentSort.column === 'lastEdited' ? 'date' : currentSort.column;
+    if (th.dataset.sort === activeCol) {
       th.classList.add(currentSort.direction === 'asc' ? 'sort-asc' : 'sort-desc');
     }
   });
@@ -1129,7 +1136,11 @@ function getSortedEntries(entries) {
     if (!isZeroA && isZeroB) return -1;
 
     let result = 0;
-    if (column === 'date') {
+    if (column === 'lastEdited') {
+      const valA = a.updatedAt || parseFloat(a.id) || 0;
+      const valB = b.updatedAt || parseFloat(b.id) || 0;
+      result = (valA - valB) * modifier;
+    } else if (column === 'date') {
       result = a.date.localeCompare(b.date) * modifier;
     } else if (column === 'name') {
       result = a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) * modifier;
@@ -1151,9 +1162,11 @@ function getSortedEntries(entries) {
       result = (a.totalAmount - b.totalAmount) * modifier;
     }
 
-    // Tie-breaker: show latest entry on top (newest ID first)
+    // Tie-breaker: show latest edited entry on top
     if (result === 0) {
-      return b.id.localeCompare(a.id);
+      const valA = a.updatedAt || parseFloat(a.id) || 0;
+      const valB = b.updatedAt || parseFloat(b.id) || 0;
+      return valB - valA;
     }
     return result;
   });
