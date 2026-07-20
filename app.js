@@ -706,26 +706,46 @@ function attachFormListeners() {
   dom.inputRd.addEventListener('input', calculateMainTotal);
 
   // Form Submit
-  dom.form.addEventListener('submit', (e) => {
+  dom.form.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (validateForm(dom.form)) {
       const billVal = parseFloat(dom.inputBill.value) || 0;
       const rdVal = parseFloat(dom.inputRd.value) || 0;
+      const nameVal = dom.inputName.value.trim();
+      const firmVal = dom.inputFirm.value.trim();
+      const phoneVal = dom.inputPhone.value.trim();
+      const bankAccountVal = tempAddBank.account || '';
+      const bankIfscVal = tempAddBank.ifsc || '';
+
+      // Auto-register new Commission Agent if not exists
+      const matchedAgent = commissionAgents.find(a => a.name.toLowerCase() === nameVal.toLowerCase());
+      if (!matchedAgent) {
+        const newAgent = {
+          name: nameVal,
+          firmName: firmVal,
+          phone: phoneVal,
+          bankAccount: bankAccountVal,
+          bankIfsc: bankIfscVal
+        };
+        commissionAgents.push(newAgent);
+        await saveCommissionAgents();
+        showToast(`Commission Agent "${nameVal}" registered automatically!`, 'success');
+      }
 
       const entry = {
         id: Date.now().toString(),
         date: dom.inputDate.value,
-        name: dom.inputName.value.trim(),
-        firmName: dom.inputFirm.value.trim(),
-        phone: dom.inputPhone.value.trim(),
+        name: nameVal,
+        firmName: firmVal,
+        phone: phoneVal,
         coldName: dom.inputCold.value.trim(),
         bags: parseInt(dom.inputBags.value, 10),
         billAmount: billVal,
         rdAmount: rdVal,
         debitAmount: 0,
         debits: [],
-        bankAccount: tempAddBank.account,
-        bankIfsc: tempAddBank.ifsc,
+        bankAccount: bankAccountVal,
+        bankIfsc: bankIfscVal,
         totalAmount: billVal + rdVal,
         updatedAt: Date.now()
       };
@@ -833,10 +853,7 @@ function attachFormListeners() {
       }
     });
 
-    // Close on blur check redirect
-    inputEl.addEventListener('change', () => {
-      checkAndPromptRegister(inputEl, inputEl.value.trim());
-    });
+
 
     // Document click closer helper
     document.addEventListener('click', (e) => {
@@ -1230,7 +1247,7 @@ function attachModalListeners() {
   });
 
   // Handle Edit Submit
-  dom.editForm.addEventListener('submit', (e) => {
+  dom.editForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (validateForm(dom.editForm)) {
       const id = dom.editId.value;
@@ -1244,12 +1261,33 @@ function attachModalListeners() {
         const debitDateVal = tempEditDebits.length > 0 ? tempEditDebits[tempEditDebits.length - 1].date : '';
         const debitUtrVal = tempEditDebits.map(d => d.utr).filter(u => u !== '').join(', ');
 
+        const nameVal = dom.editName.value.trim();
+        const firmVal = dom.editFirm.value.trim();
+        const phoneVal = dom.editPhone.value.trim();
+        const bankAccountVal = tempEditBank.account || '';
+        const bankIfscVal = tempEditBank.ifsc || '';
+
+        // Auto-register new Commission Agent if not exists
+        const matchedAgent = commissionAgents.find(a => a.name.toLowerCase() === nameVal.toLowerCase());
+        if (!matchedAgent) {
+          const newAgent = {
+            name: nameVal,
+            firmName: firmVal,
+            phone: phoneVal,
+            bankAccount: bankAccountVal,
+            bankIfsc: bankIfscVal
+          };
+          commissionAgents.push(newAgent);
+          await saveCommissionAgents();
+          showToast(`Commission Agent "${nameVal}" registered automatically!`, 'success');
+        }
+
         ledgerEntries[index] = {
           id: id,
           date: dom.editDate.value,
-          name: dom.editName.value.trim(),
-          firmName: dom.editFirm.value.trim(),
-          phone: dom.editPhone.value.trim(),
+          name: nameVal,
+          firmName: firmVal,
+          phone: phoneVal,
           coldName: dom.editCold.value.trim(),
           bags: parseInt(dom.editBags.value, 10),
           billAmount: billVal,
@@ -1260,8 +1298,8 @@ function attachModalListeners() {
           rds: tempEditRds,
           debitDate: debitDateVal,
           debitUtr: debitUtrVal,
-          bankAccount: tempEditBank.account,
-          bankIfsc: tempEditBank.ifsc,
+          bankAccount: bankAccountVal,
+          bankIfsc: bankIfscVal,
           totalAmount: (billVal - debitVal) + (rdVal - rdDetailVal),
           updatedAt: Date.now()
         };
@@ -1706,15 +1744,7 @@ function validateForm(formElement) {
     if (value) {
       const idStr = input.id.toLowerCase();
       
-      // Customer name validation (must match a registered agent)
-      if (input.id === 'input-name' || input.id === 'edit-name') {
-        const matched = commissionAgents.some(a => a.name.toLowerCase() === value.toLowerCase());
-        if (!matched) {
-          setError(input, 'Customer must be a registered Commission Agent');
-          isValid = false;
-          checkAndPromptRegister(input, value);
-        }
-      }
+
       
       // Phone validation (only digits, exactly 10 digits)
       if (input.type === 'tel' || idStr.includes('phone')) {
