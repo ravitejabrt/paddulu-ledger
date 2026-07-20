@@ -1252,22 +1252,57 @@ function validateForm(formElement) {
   let isValid = true;
   clearErrors(formElement);
 
-  const inputs = formElement.querySelectorAll('input[required]');
+  const inputs = formElement.querySelectorAll('input');
   inputs.forEach(input => {
-    const wrapper = input.closest('.input-wrapper');
     const value = input.value.trim();
+    const isRequired = input.hasAttribute('required');
 
-    if (!value) {
+    if (isRequired && !value) {
       setError(input, 'This field is required');
       isValid = false;
-    } else if (input.type === 'number') {
-      const num = parseFloat(value);
-      if (isNaN(num)) {
-        setError(input, 'Please enter a valid number');
-        isValid = false;
-      } else if (input.min && num < parseFloat(input.min)) {
-        setError(input, `Value must be at least ${input.min}`);
-        isValid = false;
+      return;
+    }
+
+    if (value) {
+      const idStr = input.id.toLowerCase();
+      
+      // Phone validation (only digits, exactly 10 digits)
+      if (input.type === 'tel' || idStr.includes('phone')) {
+        const isDigits = /^\d+$/.test(value);
+        if (!isDigits) {
+          setError(input, 'Phone number must contain only numbers');
+          isValid = false;
+        } else if (value.length !== 10) {
+          setError(input, 'Phone number must be exactly 10 digits');
+          isValid = false;
+        }
+      } 
+      // Number validation (strict digits check, reject e, E, signs, alphabets)
+      else if (input.type === 'number' || idStr.includes('bags') || idStr.includes('bill') || idStr.includes('rd') || idStr.includes('amount')) {
+        if (input.validity && input.validity.badInput) {
+          setError(input, 'Please enter only numbers');
+          isValid = false;
+        } else {
+          if (idStr.includes('bags')) {
+            if (!/^\d+$/.test(value)) {
+              setError(input, 'Bags must be a whole number (digits only)');
+              isValid = false;
+            }
+          } else if (idStr.includes('bill') || idStr.includes('rd') || idStr.includes('amount')) {
+            if (!/^\d+(\.\d{1,2})?$/.test(value)) {
+              setError(input, 'Please enter a valid amount (digits and decimal only)');
+              isValid = false;
+            }
+          }
+          
+          const num = parseFloat(value);
+          if (!isNaN(num)) {
+            if (input.min && num < parseFloat(input.min)) {
+              setError(input, `Value must be at least ${input.min}`);
+              isValid = false;
+            }
+          }
+        }
       }
     }
   });
@@ -2350,9 +2385,8 @@ function renderMiniCalendar(year, month) {
     cell.style.cssText = "padding: 0.35rem 0; font-size: 0.8rem; text-align: center; border-radius: 4px; cursor: pointer; font-weight: 500; transition: all 0.15s ease; user-select: none;";
     cell.textContent = day;
 
-    // Check if this date has transactions of any kind (ledger entry, debit line, or RD line)
+    // Check if this date has transactions of any kind (debit line or RD line)
     const hasTransactions = ledgerEntries.some(entry => {
-      if (entry.date === fullDateStr) return true;
       if (entry.debits && entry.debits.some(d => d.date === fullDateStr)) return true;
       if (entry.rds && entry.rds.some(r => r.date === fullDateStr)) return true;
       return false;
@@ -2493,11 +2527,6 @@ function attachDaySummaryListeners() {
 }
 
 function renderDaySummary(targetDate) {
-  // New entries created on this date
-  const newEntries = ledgerEntries.filter(entry => entry.date === targetDate);
-  const billEntries = newEntries.filter(entry => entry.billAmount > 0);
-  const rdEntries = newEntries.filter(entry => entry.rdAmount > 0);
-
   // Debits recorded on this date (across all entries)
   const dayDebits = [];
   ledgerEntries.forEach(entry => {
@@ -2532,8 +2561,6 @@ function renderDaySummary(targetDate) {
   });
 
   // Compute KPI Totals for this date
-  const totalBillCreated = billEntries.reduce((sum, e) => sum + e.billAmount, 0);
-  const totalRdCreated = rdEntries.reduce((sum, e) => sum + e.rdAmount, 0);
   const totalDebitsReceived = dayDebits.reduce((sum, d) => sum + d.amount, 0);
   const totalRdsReceived = dayRds.reduce((sum, r) => sum + r.amount, 0);
 
@@ -2541,16 +2568,10 @@ function renderDaySummary(targetDate) {
   const kpiEl = document.getElementById('day-summary-kpis');
   if (kpiEl) {
     kpiEl.innerHTML = `
-      <div style="background: rgba(14, 165, 233, 0.08); padding: 0.35rem 0.65rem; border-radius: 4px; border: 1px solid rgba(14, 165, 233, 0.2); font-size: 0.78rem;">
-        Bill Given: <strong style="color: var(--accent-info);">${formatCurrency(totalBillCreated)}</strong>
+      <div style="background: rgba(16, 185, 129, 0.08); padding: 0.35rem 0.65rem; border-radius: 4px; border: 1px solid rgba(16, 185, 129, 0.2); font-size: 0.78rem; flex: 1; text-align: center;">
+        Bill Amount Received: <strong style="color: var(--accent-success);">${formatCurrency(totalDebitsReceived)}</strong>
       </div>
-      <div style="background: rgba(249, 115, 22, 0.08); padding: 0.35rem 0.65rem; border-radius: 4px; border: 1px solid rgba(249, 115, 22, 0.2); font-size: 0.78rem;">
-        RD Given: <strong style="color: var(--accent-warning);">${formatCurrency(totalRdCreated)}</strong>
-      </div>
-      <div style="background: rgba(16, 185, 129, 0.08); padding: 0.35rem 0.65rem; border-radius: 4px; border: 1px solid rgba(16, 185, 129, 0.2); font-size: 0.78rem;">
-        Debits Received: <strong style="color: var(--accent-success);">${formatCurrency(totalDebitsReceived)}</strong>
-      </div>
-      <div style="background: rgba(139, 92, 246, 0.08); padding: 0.35rem 0.65rem; border-radius: 4px; border: 1px solid rgba(139, 92, 246, 0.2); font-size: 0.78rem;">
+      <div style="background: rgba(139, 92, 246, 0.08); padding: 0.35rem 0.65rem; border-radius: 4px; border: 1px solid rgba(139, 92, 246, 0.2); font-size: 0.78rem; flex: 1; text-align: center;">
         RD Received: <strong style="color: var(--accent-purple);">${formatCurrency(totalRdsReceived)}</strong>
       </div>
     `;
@@ -2558,90 +2579,8 @@ function renderDaySummary(targetDate) {
 
   // Build HTML details
   let html = '';
+  let receivedHtml = '';
 
-  // Section A: New Bill entries
-  if (billEntries.length > 0) {
-    let rows = '';
-    billEntries.forEach((e, idx) => {
-      rows += `
-        <tr>
-          <td style="text-align: center; color: var(--text-secondary); font-weight: bold;">${idx + 1}</td>
-          <td>
-            <span style="font-weight: 600; color: var(--text-primary);">${escapeHtml(e.name)}</span>
-            ${e.firmName ? `<div style="font-size: 0.7rem; color: var(--text-muted);">${escapeHtml(e.firmName)}</div>` : ''}
-          </td>
-          <td>${e.coldName || '-'}</td>
-          <td style="text-align: right;">${e.bags} Bags</td>
-          <td class="numeric" style="color: var(--accent-info); font-weight: 600;">${formatCurrency(e.billAmount)}</td>
-        </tr>
-      `;
-    });
-    html += `
-      <div class="detail-section">
-        <div class="detail-section-title" style="color: var(--accent-info); font-weight: 700; border-bottom: 2px solid rgba(14, 165, 233, 0.15); padding-bottom: 0.4rem; font-size: 0.95rem; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.35rem;">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
-          New Bill Entries Created
-        </div>
-        <table class="debit-mini-table" style="margin-bottom: 1.5rem;">
-          <thead>
-            <tr>
-              <th style="width: 35px; text-align: center;">#</th>
-              <th>Customer</th>
-              <th>Cold Storage</th>
-              <th style="width: 100px; text-align: right;">Quantity</th>
-              <th style="text-align: right; width: 140px;">Bill Amount</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows}
-          </tbody>
-        </table>
-      </div>
-    `;
-  }
-
-  // Section B: New RD entries
-  if (rdEntries.length > 0) {
-    let rows = '';
-    rdEntries.forEach((e, idx) => {
-      rows += `
-        <tr>
-          <td style="text-align: center; color: var(--text-secondary); font-weight: bold;">${idx + 1}</td>
-          <td>
-            <span style="font-weight: 600; color: var(--text-primary);">${escapeHtml(e.name)}</span>
-            ${e.firmName ? `<div style="font-size: 0.7rem; color: var(--text-muted);">${escapeHtml(e.firmName)}</div>` : ''}
-          </td>
-          <td>${e.coldName || '-'}</td>
-          <td style="text-align: right;">${e.bags} Bags</td>
-          <td class="numeric" style="color: var(--accent-warning); font-weight: 600;">${formatCurrency(e.rdAmount)}</td>
-        </tr>
-      `;
-    });
-    html += `
-      <div class="detail-section">
-        <div class="detail-section-title" style="color: var(--accent-warning); font-weight: 700; border-bottom: 2px solid rgba(249, 115, 22, 0.15); padding-bottom: 0.4rem; font-size: 0.95rem; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.35rem;">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
-          New RD Entries Created
-        </div>
-        <table class="debit-mini-table" style="margin-bottom: 1.5rem;">
-          <thead>
-            <tr>
-              <th style="width: 35px; text-align: center;">#</th>
-              <th>Customer</th>
-              <th>Cold Storage</th>
-              <th style="width: 100px; text-align: right;">Quantity</th>
-              <th style="text-align: right; width: 140px;">RD Amount</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows}
-          </tbody>
-        </table>
-      </div>
-    `;
-  }
-
-  // Section C: Debits Received
   if (dayDebits.length > 0) {
     let rows = '';
     dayDebits.forEach((d, idx) => {
@@ -2657,19 +2596,16 @@ function renderDaySummary(targetDate) {
         </tr>
       `;
     });
-    html += `
-      <div class="detail-section">
-        <div class="detail-section-title" style="color: var(--accent-success); font-weight: 700; border-bottom: 2px solid rgba(16, 185, 129, 0.15); padding-bottom: 0.4rem; font-size: 0.95rem; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.35rem;">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-          Debits (Payments Received)
-        </div>
-        <table class="debit-mini-table" style="margin-bottom: 1.5rem;">
+    receivedHtml += `
+      <div style="margin-bottom: 1.25rem;">
+        <div style="font-size: 0.85rem; font-weight: 600; color: var(--accent-success); margin-bottom: 0.4rem; font-family: inherit;">Bill Payments Received (Debits)</div>
+        <table class="debit-mini-table">
           <thead>
             <tr>
               <th style="width: 35px; text-align: center;">#</th>
               <th>Customer</th>
               <th>UTR / Reference</th>
-              <th style="text-align: right; width: 140px;">Debit Amount</th>
+              <th style="text-align: right; width: 140px;">Bill Amount</th>
             </tr>
           </thead>
           <tbody>
@@ -2680,7 +2616,6 @@ function renderDaySummary(targetDate) {
     `;
   }
 
-  // Section D: RDs Deducted
   if (dayRds.length > 0) {
     let rows = '';
     dayRds.forEach((r, idx) => {
@@ -2695,13 +2630,10 @@ function renderDaySummary(targetDate) {
         </tr>
       `;
     });
-    html += `
-      <div class="detail-section">
-        <div class="detail-section-title" style="color: var(--accent-purple); font-weight: 700; border-bottom: 2px solid rgba(139, 92, 246, 0.15); padding-bottom: 0.4rem; font-size: 0.95rem; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.35rem;">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
-          RD Deductions Received
-        </div>
-        <table class="debit-mini-table" style="margin-bottom: 1.5rem;">
+    receivedHtml += `
+      <div style="margin-bottom: 1.25rem;">
+        <div style="font-size: 0.85rem; font-weight: 600; color: var(--accent-purple); margin-bottom: 0.4rem; font-family: inherit;">RD Deductions Claimed</div>
+        <table class="debit-mini-table">
           <thead>
             <tr>
               <th style="width: 35px; text-align: center;">#</th>
@@ -2717,8 +2649,17 @@ function renderDaySummary(targetDate) {
     `;
   }
 
-  // If no transactions at all
-  if (billEntries.length === 0 && rdEntries.length === 0 && dayDebits.length === 0 && dayRds.length === 0) {
+  if (receivedHtml) {
+    html += `
+      <div class="summary-group-card" style="background: rgba(16, 185, 129, 0.02); border: 1px solid rgba(16, 185, 129, 0.15); padding: 1.25rem; border-radius: 6px; margin-bottom: 1.5rem; box-shadow: 0 4px 15px -5px rgba(0, 0, 0, 0.2);">
+        <div style="font-size: 1rem; font-weight: 700; color: var(--accent-success); border-bottom: 2px solid rgba(16, 185, 129, 0.15); padding-bottom: 0.5rem; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.4rem; font-family: inherit;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          RECEIVED / DEBITED TRANSACTIONS
+        </div>
+        ${receivedHtml}
+      </div>
+    `;
+  } else {
     html = `
       <div style="text-align: center; padding: 3rem 1.5rem; color: var(--text-muted); font-style: italic;">
         <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom: 0.5rem; opacity: 0.5;"><circle cx="12" cy="12" r="10"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
