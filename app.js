@@ -196,6 +196,7 @@ document.addEventListener('DOMContentLoaded', () => {
   attachBankModalListeners();
   attachViewDetailsListeners();
   attachSupabaseListeners();
+  attachDaySummaryListeners();
 });
 
 // --- State Methods & Cryptography ---
@@ -2294,6 +2295,426 @@ function attachViewDetailsListeners() {
     // Clean up override style
     styleEl.remove();
   });
+}
+
+let miniCalendarYear = new Date().getFullYear();
+let miniCalendarMonth = new Date().getMonth();
+let selectedSummaryDate = new Date().toISOString().split('T')[0];
+
+function renderMiniCalendar(year, month) {
+  const grid = document.getElementById('summary-calendar-grid');
+  const title = document.getElementById('summary-calendar-title');
+  if (!grid || !title) return;
+
+  grid.innerHTML = '';
+  
+  const monthNames = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+  ];
+  title.textContent = `${monthNames[month]} ${year}`;
+
+  const firstDayIndex = new Date(year, month, 1).getDay();
+  const totalDaysCurrentMonth = new Date(year, month + 1, 0).getDate();
+  const totalDaysPrevMonth = new Date(year, month, 0).getDate();
+
+  // 1. Fill previous month's trailing days
+  for (let i = firstDayIndex - 1; i >= 0; i--) {
+    const dayNum = totalDaysPrevMonth - i;
+    const cell = document.createElement('div');
+    cell.style.cssText = "padding: 0.35rem 0; font-size: 0.8rem; color: rgba(255,255,255,0.15); text-align: center; user-select: none;";
+    cell.textContent = dayNum;
+    grid.appendChild(cell);
+  }
+
+  // 2. Fill current month's active days
+  for (let day = 1; day <= totalDaysCurrentMonth; day++) {
+    const dayStr = String(day).padStart(2, '0');
+    const monthStr = String(month + 1).padStart(2, '0');
+    const fullDateStr = `${year}-${monthStr}-${dayStr}`;
+
+    const cell = document.createElement('div');
+    cell.style.cssText = "padding: 0.35rem 0; font-size: 0.8rem; text-align: center; border-radius: 4px; cursor: pointer; font-weight: 500; transition: all 0.15s ease; user-select: none;";
+    cell.textContent = day;
+
+    // Check if this date has transactions of any kind (ledger entry, debit line, or RD line)
+    const hasTransactions = ledgerEntries.some(entry => {
+      if (entry.date === fullDateStr) return true;
+      if (entry.debits && entry.debits.some(d => d.date === fullDateStr)) return true;
+      if (entry.rds && entry.rds.some(r => r.date === fullDateStr)) return true;
+      return false;
+    });
+
+    if (hasTransactions) {
+      cell.style.border = "1px solid var(--accent-success)";
+      cell.style.background = "rgba(16, 185, 129, 0.1)";
+      cell.title = "Transactions recorded";
+    }
+
+    if (fullDateStr === selectedSummaryDate) {
+      cell.style.background = "var(--btn-primary-bg)";
+      cell.style.color = "var(--btn-primary-text)";
+      cell.style.border = "1px solid var(--btn-primary-bg)";
+    }
+
+    cell.addEventListener('mouseenter', () => {
+      if (fullDateStr !== selectedSummaryDate) {
+        cell.style.background = "rgba(255,255,255,0.08)";
+      }
+    });
+    cell.addEventListener('mouseleave', () => {
+      if (fullDateStr !== selectedSummaryDate) {
+        cell.style.background = hasTransactions ? "rgba(16, 185, 129, 0.1)" : "transparent";
+      }
+    });
+
+    cell.addEventListener('click', (e) => {
+      e.stopPropagation();
+      selectedSummaryDate = fullDateStr;
+      document.getElementById('summary-selected-date-text').textContent = formatDisplayDate(fullDateStr);
+      renderDaySummary(fullDateStr);
+      document.getElementById('summary-calendar-picker').style.display = 'none';
+      renderMiniCalendar(year, month);
+    });
+
+    grid.appendChild(cell);
+  }
+
+  // 3. Fill next month's trailing days (to complete grid rows)
+  const totalCellsUsed = firstDayIndex + totalDaysCurrentMonth;
+  const remainingCells = 42 - totalCellsUsed;
+  for (let i = 1; i <= remainingCells; i++) {
+    const cell = document.createElement('div');
+    cell.style.cssText = "padding: 0.35rem 0; font-size: 0.8rem; color: rgba(255,255,255,0.15); text-align: center; user-select: none;";
+    cell.textContent = i;
+    grid.appendChild(cell);
+  }
+}
+
+function attachDaySummaryListeners() {
+  const btnTrigger = document.getElementById('btn-trigger-day-summary');
+  const modal = document.getElementById('day-summary-modal');
+  const btnClose = document.getElementById('btn-day-summary-close');
+  const btnCloseFooter = document.getElementById('btn-day-summary-close-footer');
+  const btnPrint = document.getElementById('btn-day-summary-print');
+  
+  const dateDisplay = document.getElementById('summary-date-display');
+  const calendarPicker = document.getElementById('summary-calendar-picker');
+  const btnPrev = document.getElementById('btn-summary-prev-month');
+  const btnNext = document.getElementById('btn-summary-next-month');
+
+  if (!btnTrigger || !modal) return;
+
+  const closeSummaryModal = () => {
+    modal.close();
+    calendarPicker.style.display = 'none';
+  };
+
+  btnTrigger.addEventListener('click', () => {
+    const today = new Date().toISOString().split('T')[0];
+    selectedSummaryDate = today;
+    
+    const todayDate = new Date();
+    miniCalendarYear = todayDate.getFullYear();
+    miniCalendarMonth = todayDate.getMonth();
+
+    document.getElementById('summary-selected-date-text').textContent = formatDisplayDate(today);
+    renderDaySummary(today);
+    renderMiniCalendar(miniCalendarYear, miniCalendarMonth);
+    modal.showModal();
+  });
+
+  btnClose.addEventListener('click', closeSummaryModal);
+  btnCloseFooter.addEventListener('click', closeSummaryModal);
+  
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) {
+      closeSummaryModal();
+    }
+  });
+
+  dateDisplay.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isVisible = calendarPicker.style.display === 'block';
+    calendarPicker.style.display = isVisible ? 'none' : 'block';
+  });
+
+  modal.addEventListener('click', (e) => {
+    if (e.target !== dateDisplay && !dateDisplay.contains(e.target) && e.target !== calendarPicker && !calendarPicker.contains(e.target)) {
+      calendarPicker.style.display = 'none';
+    }
+  });
+
+  btnPrev.addEventListener('click', (e) => {
+    e.stopPropagation();
+    miniCalendarMonth--;
+    if (miniCalendarMonth < 0) {
+      miniCalendarMonth = 11;
+      miniCalendarYear--;
+    }
+    renderMiniCalendar(miniCalendarYear, miniCalendarMonth);
+  });
+
+  btnNext.addEventListener('click', (e) => {
+    e.stopPropagation();
+    miniCalendarMonth++;
+    if (miniCalendarMonth > 11) {
+      miniCalendarMonth = 0;
+      miniCalendarYear++;
+    }
+    renderMiniCalendar(miniCalendarYear, miniCalendarMonth);
+  });
+
+  btnPrint.addEventListener('click', () => {
+    const styleEl = document.createElement('style');
+    styleEl.id = 'print-portrait-override';
+    styleEl.innerHTML = `@media print { @page { size: portrait !important; margin: 8mm !important; } }`;
+    document.head.appendChild(styleEl);
+
+    document.body.classList.add('printing-day-summary');
+    window.print();
+    document.body.classList.remove('printing-day-summary');
+
+    styleEl.remove();
+  });
+}
+
+function renderDaySummary(targetDate) {
+  // New entries created on this date
+  const newEntries = ledgerEntries.filter(entry => entry.date === targetDate);
+  const billEntries = newEntries.filter(entry => entry.billAmount > 0);
+  const rdEntries = newEntries.filter(entry => entry.rdAmount > 0);
+
+  // Debits recorded on this date (across all entries)
+  const dayDebits = [];
+  ledgerEntries.forEach(entry => {
+    if (entry.debits && entry.debits.length > 0) {
+      entry.debits.forEach(d => {
+        if (d.date === targetDate) {
+          dayDebits.push({
+            customerName: entry.name,
+            firmName: entry.firmName,
+            utr: d.utr,
+            amount: d.amount
+          });
+        }
+      });
+    }
+  });
+
+  // RD deductions recorded on this date (across all entries)
+  const dayRds = [];
+  ledgerEntries.forEach(entry => {
+    if (entry.rds && entry.rds.length > 0) {
+      entry.rds.forEach(r => {
+        if (r.date === targetDate) {
+          dayRds.push({
+            customerName: entry.name,
+            firmName: entry.firmName,
+            amount: r.amount
+          });
+        }
+      });
+    }
+  });
+
+  // Compute KPI Totals for this date
+  const totalBillCreated = billEntries.reduce((sum, e) => sum + e.billAmount, 0);
+  const totalRdCreated = rdEntries.reduce((sum, e) => sum + e.rdAmount, 0);
+  const totalDebitsReceived = dayDebits.reduce((sum, d) => sum + d.amount, 0);
+  const totalRdsReceived = dayRds.reduce((sum, r) => sum + r.amount, 0);
+
+  // Update KPI Section
+  const kpiEl = document.getElementById('day-summary-kpis');
+  if (kpiEl) {
+    kpiEl.innerHTML = `
+      <div style="background: rgba(14, 165, 233, 0.08); padding: 0.35rem 0.65rem; border-radius: 4px; border: 1px solid rgba(14, 165, 233, 0.2); font-size: 0.78rem;">
+        Bill Given: <strong style="color: var(--accent-info);">${formatCurrency(totalBillCreated)}</strong>
+      </div>
+      <div style="background: rgba(249, 115, 22, 0.08); padding: 0.35rem 0.65rem; border-radius: 4px; border: 1px solid rgba(249, 115, 22, 0.2); font-size: 0.78rem;">
+        RD Given: <strong style="color: var(--accent-warning);">${formatCurrency(totalRdCreated)}</strong>
+      </div>
+      <div style="background: rgba(16, 185, 129, 0.08); padding: 0.35rem 0.65rem; border-radius: 4px; border: 1px solid rgba(16, 185, 129, 0.2); font-size: 0.78rem;">
+        Debits Received: <strong style="color: var(--accent-success);">${formatCurrency(totalDebitsReceived)}</strong>
+      </div>
+      <div style="background: rgba(139, 92, 246, 0.08); padding: 0.35rem 0.65rem; border-radius: 4px; border: 1px solid rgba(139, 92, 246, 0.2); font-size: 0.78rem;">
+        RD Received: <strong style="color: var(--accent-purple);">${formatCurrency(totalRdsReceived)}</strong>
+      </div>
+    `;
+  }
+
+  // Build HTML details
+  let html = '';
+
+  // Section A: New Bill entries
+  if (billEntries.length > 0) {
+    let rows = '';
+    billEntries.forEach((e, idx) => {
+      rows += `
+        <tr>
+          <td style="text-align: center; color: var(--text-secondary); font-weight: bold;">${idx + 1}</td>
+          <td>
+            <span style="font-weight: 600; color: var(--text-primary);">${escapeHtml(e.name)}</span>
+            ${e.firmName ? `<div style="font-size: 0.7rem; color: var(--text-muted);">${escapeHtml(e.firmName)}</div>` : ''}
+          </td>
+          <td>${e.coldName || '-'}</td>
+          <td style="text-align: right;">${e.bags} Bags</td>
+          <td class="numeric" style="color: var(--accent-info); font-weight: 600;">${formatCurrency(e.billAmount)}</td>
+        </tr>
+      `;
+    });
+    html += `
+      <div class="detail-section">
+        <div class="detail-section-title" style="color: var(--accent-info); font-weight: 700; border-bottom: 2px solid rgba(14, 165, 233, 0.15); padding-bottom: 0.4rem; font-size: 0.95rem; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.35rem;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+          New Bill Entries Created
+        </div>
+        <table class="debit-mini-table" style="margin-bottom: 1.5rem;">
+          <thead>
+            <tr>
+              <th style="width: 35px; text-align: center;">#</th>
+              <th>Customer</th>
+              <th>Cold Storage</th>
+              <th style="width: 100px; text-align: right;">Quantity</th>
+              <th style="text-align: right; width: 140px;">Bill Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  // Section B: New RD entries
+  if (rdEntries.length > 0) {
+    let rows = '';
+    rdEntries.forEach((e, idx) => {
+      rows += `
+        <tr>
+          <td style="text-align: center; color: var(--text-secondary); font-weight: bold;">${idx + 1}</td>
+          <td>
+            <span style="font-weight: 600; color: var(--text-primary);">${escapeHtml(e.name)}</span>
+            ${e.firmName ? `<div style="font-size: 0.7rem; color: var(--text-muted);">${escapeHtml(e.firmName)}</div>` : ''}
+          </td>
+          <td>${e.coldName || '-'}</td>
+          <td style="text-align: right;">${e.bags} Bags</td>
+          <td class="numeric" style="color: var(--accent-warning); font-weight: 600;">${formatCurrency(e.rdAmount)}</td>
+        </tr>
+      `;
+    });
+    html += `
+      <div class="detail-section">
+        <div class="detail-section-title" style="color: var(--accent-warning); font-weight: 700; border-bottom: 2px solid rgba(249, 115, 22, 0.15); padding-bottom: 0.4rem; font-size: 0.95rem; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.35rem;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+          New RD Entries Created
+        </div>
+        <table class="debit-mini-table" style="margin-bottom: 1.5rem;">
+          <thead>
+            <tr>
+              <th style="width: 35px; text-align: center;">#</th>
+              <th>Customer</th>
+              <th>Cold Storage</th>
+              <th style="width: 100px; text-align: right;">Quantity</th>
+              <th style="text-align: right; width: 140px;">RD Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  // Section C: Debits Received
+  if (dayDebits.length > 0) {
+    let rows = '';
+    dayDebits.forEach((d, idx) => {
+      rows += `
+        <tr>
+          <td style="text-align: center; color: var(--text-secondary); font-weight: bold;">${idx + 1}</td>
+          <td>
+            <span style="font-weight: 600; color: var(--text-primary);">${escapeHtml(d.customerName)}</span>
+            ${d.firmName ? `<div style="font-size: 0.7rem; color: var(--text-muted);">${escapeHtml(d.firmName)}</div>` : ''}
+          </td>
+          <td>${d.utr ? escapeHtml(d.utr) : '-'}</td>
+          <td class="numeric" style="color: var(--accent-success); font-weight: 600;">${formatCurrency(d.amount)}</td>
+        </tr>
+      `;
+    });
+    html += `
+      <div class="detail-section">
+        <div class="detail-section-title" style="color: var(--accent-success); font-weight: 700; border-bottom: 2px solid rgba(16, 185, 129, 0.15); padding-bottom: 0.4rem; font-size: 0.95rem; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.35rem;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          Debits (Payments Received)
+        </div>
+        <table class="debit-mini-table" style="margin-bottom: 1.5rem;">
+          <thead>
+            <tr>
+              <th style="width: 35px; text-align: center;">#</th>
+              <th>Customer</th>
+              <th>UTR / Reference</th>
+              <th style="text-align: right; width: 140px;">Debit Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  // Section D: RDs Deducted
+  if (dayRds.length > 0) {
+    let rows = '';
+    dayRds.forEach((r, idx) => {
+      rows += `
+        <tr>
+          <td style="text-align: center; color: var(--text-secondary); font-weight: bold;">${idx + 1}</td>
+          <td>
+            <span style="font-weight: 600; color: var(--text-primary);">${escapeHtml(r.customerName)}</span>
+            ${r.firmName ? `<div style="font-size: 0.7rem; color: var(--text-muted);">${escapeHtml(r.firmName)}</div>` : ''}
+          </td>
+          <td class="numeric" style="color: var(--accent-purple); font-weight: 600;">${formatCurrency(r.amount)}</td>
+        </tr>
+      `;
+    });
+    html += `
+      <div class="detail-section">
+        <div class="detail-section-title" style="color: var(--accent-purple); font-weight: 700; border-bottom: 2px solid rgba(139, 92, 246, 0.15); padding-bottom: 0.4rem; font-size: 0.95rem; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.35rem;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+          RD Deductions Received
+        </div>
+        <table class="debit-mini-table" style="margin-bottom: 1.5rem;">
+          <thead>
+            <tr>
+              <th style="width: 35px; text-align: center;">#</th>
+              <th>Customer</th>
+              <th style="text-align: right; width: 140px;">RD Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  // If no transactions at all
+  if (billEntries.length === 0 && rdEntries.length === 0 && dayDebits.length === 0 && dayRds.length === 0) {
+    html = `
+      <div style="text-align: center; padding: 3rem 1.5rem; color: var(--text-muted); font-style: italic;">
+        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom: 0.5rem; opacity: 0.5;"><circle cx="12" cy="12" r="10"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+        <div>No transactions recorded on this date (${formatDisplayDate(targetDate)}).</div>
+      </div>
+    `;
+  }
+
+  document.getElementById('day-summary-details').innerHTML = html;
 }
 
 function openViewDetailsModal(id) {

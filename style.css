@@ -440,6 +440,22 @@ body {
   transform: translateY(0);
 }
 
+.btn-teal {
+  background: linear-gradient(135deg, #0d9488 0%, #059669 100%);
+  color: white;
+  box-shadow: 0 4px 15px -4px rgba(13, 148, 136, 0.4);
+}
+
+.btn-teal:hover {
+  background: linear-gradient(135deg, #14b8a6 0%, #10b981 100%);
+  box-shadow: 0 6px 20px -2px rgba(13, 148, 136, 0.6);
+  transform: translateY(-1px);
+}
+
+.btn-teal:active {
+  transform: translateY(0);
+}
+
 .btn-secondary {
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--border-color);
@@ -2035,5 +2051,65 @@ body:not(.authenticated) .login-container {
   body.printing-details .modal-actions,
   body.printing-details #btn-view-print {
     display: none !important;
+  }
+
+  /* Print overrides for Day Transactions summary */
+  body.printing-day-summary .app-container,
+  body.printing-day-summary dialog:not(#day-summary-modal) {
+    display: none !important;
+  }
+
+  body.printing-day-summary #day-summary-modal {
+    display: block !important;
+    position: static !important;
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  body.printing-day-summary #day-summary-modal .modal-header {
+    border-bottom: 2px solid #000 !important;
+    padding-bottom: 0.35rem !important;
+    margin-bottom: 0.75rem !important;
+  }
+
+  body.printing-day-summary #day-summary-modal .modal-header button,
+  body.printing-day-summary #day-summary-modal .modal-actions,
+  body.printing-day-summary #day-summary-modal #summary-date-input::-webkit-calendar-picker-indicator {
+    display: none !important;
+  }
+
+  body.printing-day-summary #day-summary-modal .modal-content {
+    background: transparent !important;
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+  }
+
+  body.printing-day-summary #day-summary-modal * {
+    color: #000 !important;
+    text-shadow: none !important;
+    background: transparent !important;
+  }
+
+  body.printing-day-summary #day-summary-modal table {
+    border: 1px solid #000 !important;
+    width: 100% !important;
+  }
+
+  body.printing-day-summary #day-summary-modal table th {
+    background: #eaeaea !important;
+    color: #000 !important;
+    border-bottom: 2px solid #000 !important;
+    font-weight: bold !important;
+  }
+
+  body.printing-day-summary #day-summary-modal table td {
+    border-bottom: 1px solid #ccc !important;
+    color: #000 !important;
   }
 }
