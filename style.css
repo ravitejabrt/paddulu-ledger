@@ -2168,3 +2168,69 @@ body:not(.authenticated) .login-container {
   text-align: center;
 }
 
+/* Commission Agents Directory Printing Rules */
+@media print {
+  body.printing-agents .app-container,
+  body.printing-agents dialog:not(#view-agents-modal),
+  body.printing-agents #toast-container {
+    display: none !important;
+  }
+  
+  body.printing-agents #view-agents-modal {
+    display: block !important;
+    position: static !important;
+    box-shadow: none !important;
+    border: none !important;
+    background: transparent !important;
+  }
+
+  body.printing-agents #view-agents-modal .btn,
+  body.printing-agents #view-agents-modal .btn-close-modal,
+  body.printing-agents #view-agents-modal .modal-actions,
+  body.printing-agents #view-agents-modal .btn-delete-agent {
+    display: none !important;
+  }
+
+  body.printing-agents #view-agents-modal .modal-content {
+    background: transparent !important;
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+    max-width: 100% !important;
+    width: 100% !important;
+  }
+
+  body.printing-agents #view-agents-modal * {
+    color: #000 !important;
+    text-shadow: none !important;
+    background: transparent !important;
+  }
+
+  body.printing-agents #view-agents-modal table {
+    border: 1px solid #000 !important;
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+
+  body.printing-agents #view-agents-modal table th {
+    background: #eaeaea !important;
+    color: #000 !important;
+    border-bottom: 2px solid #000 !important;
+    border: 1px solid #000 !important;
+    font-weight: bold !important;
+    padding: 6px !important;
+  }
+
+  body.printing-agents #view-agents-modal table td {
+    border: 1px solid #000 !important;
+    color: #000 !important;
+    padding: 6px !important;
+  }
+
+  body.printing-agents #view-agents-modal table th:nth-child(5),
+  body.printing-agents #view-agents-modal table td:nth-child(5) {
+    display: none !important;
+  }
+}
+
+

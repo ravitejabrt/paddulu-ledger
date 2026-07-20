@@ -180,6 +180,8 @@ const dom = {
   btnViewAgentsClose: document.getElementById('btn-view-agents-close'),
   btnAddAgentTriggerInside: document.getElementById('btn-add-agent-trigger-inside'),
   agentsListBody: document.getElementById('agents-list-body'),
+  btnViewAgentsPrint: document.getElementById('btn-view-agents-print'),
+  btnViewAgentsCsv: document.getElementById('btn-view-agents-csv'),
 
   // Custom Autocomplete Search Dropdowns
   inputNameDropdown: document.getElementById('input-name-dropdown'),
@@ -1039,6 +1041,61 @@ function attachAddAgentModalListeners() {
       dom.viewAgentsModal.showModal();
     }
   });
+
+  // Print Agents Directory
+  if (dom.btnViewAgentsPrint) {
+    dom.btnViewAgentsPrint.addEventListener('click', () => {
+      if (commissionAgents.length === 0) {
+        showToast('No commission agents registered to print.', 'info');
+        return;
+      }
+      const styleEl = document.createElement('style');
+      styleEl.id = 'print-portrait-override';
+      styleEl.innerHTML = `@media print { @page { size: portrait !important; margin: 8mm !important; } }`;
+      document.head.appendChild(styleEl);
+
+      document.body.classList.add('printing-agents');
+      window.print();
+      document.body.classList.remove('printing-agents');
+
+      styleEl.remove();
+    });
+  }
+
+  // Export Agents Directory to CSV
+  if (dom.btnViewAgentsCsv) {
+    dom.btnViewAgentsCsv.addEventListener('click', () => {
+      if (commissionAgents.length === 0) {
+        showToast('No commission agents registered to export.', 'info');
+        return;
+      }
+
+      const headers = ['Agent Name', 'Firm Name', 'Phone Number', 'Bank Account Number', 'Bank IFSC Code'];
+      const rows = commissionAgents.map(a => [
+        a.name,
+        a.firmName || '',
+        a.phone || '',
+        a.bankAccount || '',
+        a.bankIfsc || ''
+      ]);
+
+      const csvContent = [
+        headers.join(','),
+        ...rows.map(r => r.map(val => `"${val.replace(/"/g, '""')}"`).join(','))
+      ].join('\n');
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `commission_agents_directory_${new Date().toISOString().split('T')[0]}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      showToast('Commission agents directory exported to CSV!', 'success');
+    });
+  }
 }
 
 function attachFilterListeners() {
