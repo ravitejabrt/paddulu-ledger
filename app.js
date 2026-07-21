@@ -556,49 +556,94 @@ async function loadLedgerEntries() {
 }
 
 async function loadCommissionAgents() {
-  let agents = [];
+  let localAgentsList = [];
   
   // 1. Try to load from local server /api/agents
   try {
     const response = await fetch('/api/agents');
     if (response.ok) {
-      agents = await response.json();
+      localAgentsList = await response.json();
     }
   } catch (err) {
     console.log('No local server database found (expected in production).');
   }
 
   // 2. Try local browser storage if empty
-  if (agents.length === 0) {
+  if (localAgentsList.length === 0) {
     const localAgents = localStorage.getItem('commission_agents');
     if (localAgents) {
       try {
-        agents = JSON.parse(localAgents);
+        localAgentsList = JSON.parse(localAgents);
       } catch (e) {
         console.error(e);
       }
     }
   }
 
+  let finalAgents = [...localAgentsList];
+
   // 3. Try to load from Supabase if connected
   if (supabaseClient) {
     try {
       const { data, error } = await supabaseClient.from('commission_agents').select('*');
-      if (!error && data && data.length > 0) {
-        agents = data.map(row => ({
+      if (!error && data) {
+        const cloudAgents = data.map(row => ({
           name: row.name,
           firmName: row.firm_name,
           phone: row.phone,
           bankAccount: row.bank_account,
           bankIfsc: row.bank_ifsc
         }));
+
+        if (cloudAgents.length === 0 && localAgentsList.length > 0) {
+          // Sync local agents to Supabase since Supabase is empty
+          showToast('Migrating local commission agents to Supabase...', 'info');
+          const rows = localAgentsList.map(a => ({
+            name: a.name,
+            firm_name: a.firmName,
+            phone: a.phone,
+            bank_account: a.bankAccount,
+            bank_ifsc: a.bankIfsc
+          }));
+          const { error: uploadError } = await supabaseClient.from('commission_agents').upsert(rows);
+          if (uploadError) {
+            console.error('Failed to upload local agents to Supabase:', uploadError);
+          } else {
+            showToast('Migrated all commission agents to cloud database!', 'success');
+          }
+        } else if (cloudAgents.length > 0) {
+          // Merge local and cloud agents to avoid losing local configurations
+          const merged = [...cloudAgents];
+          let newLocalCount = 0;
+          
+          for (const local of localAgentsList) {
+            const exists = merged.some(m => m.name.toLowerCase() === local.name.toLowerCase());
+            if (!exists) {
+              merged.push(local);
+              newLocalCount++;
+              // Save the missing local agent to Supabase too
+              await supabaseClient.from('commission_agents').upsert([{
+                name: local.name,
+                firm_name: local.firmName,
+                phone: local.phone,
+                bank_account: local.bankAccount,
+                bank_ifsc: local.bankIfsc
+              }]);
+            }
+          }
+
+          if (newLocalCount > 0) {
+            showToast(`Merged and synced ${newLocalCount} local agents to cloud database!`, 'success');
+          }
+          finalAgents = merged;
+        }
       }
     } catch (e) {
-      console.warn("Supabase commission_agents table not found. Storing locally.");
+      console.warn("Supabase commission_agents table not found or select failed.", e);
     }
   }
 
-  commissionAgents = agents || [];
+  commissionAgents = finalAgents || [];
   populateAgentSuggestions();
 }
 
@@ -690,6 +735,17 @@ async function deleteSupabaseEntries(ids) {
   } catch (error) {
     console.error('Supabase batch delete error:', error);
     showToast('Failed to delete selected records from Supabase.', 'error');
+  }
+}
+
+async function deleteSupabaseAgent(name) {
+  if (!supabaseClient) return;
+  try {
+    const { error } = await supabaseClient.from('commission_agents').delete().eq('name', name);
+    if (error) throw error;
+  } catch (error) {
+    console.error('Supabase agent delete error:', error);
+    showToast('Failed to delete agent from Supabase.', 'error');
   }
 }
 
@@ -953,8 +1009,10 @@ function renderAgentsDirectory() {
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
       const agent = commissionAgents[idx];
       if (confirm(`Are you sure you want to delete Commission Agent "${agent.name}"?`)) {
+        const deletedAgentName = agent.name;
         commissionAgents.splice(idx, 1);
         await saveCommissionAgents();
+        await deleteSupabaseAgent(deletedAgentName);
         showToast(`Commission Agent "${agent.name}" deleted successfully.`, 'info');
         renderAgentsDirectory();
       }
