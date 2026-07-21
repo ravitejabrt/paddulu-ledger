@@ -785,6 +785,10 @@ td.numeric {
   max-width: 650px;
 }
 
+#view-agents-modal.modal-dialog {
+  max-width: 850px;
+}
+
 .modal-dialog::backdrop {
   background: rgba(11, 15, 25, 0.85);
   backdrop-filter: blur(12px);
@@ -2170,6 +2174,12 @@ body:not(.authenticated) .login-container {
 
 /* Commission Agents Directory Printing Rules */
 @media print {
+  body.printing-agents {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: white !important;
+  }
+
   body.printing-agents .app-container,
   body.printing-agents dialog:not(#view-agents-modal),
   body.printing-agents #toast-container {
@@ -2178,7 +2188,14 @@ body:not(.authenticated) .login-container {
   
   body.printing-agents #view-agents-modal {
     display: block !important;
-    position: static !important;
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    right: 0 !important;
+    margin: 0 !important;
+    padding: 10mm !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
     box-shadow: none !important;
     border: none !important;
     background: transparent !important;
@@ -2187,7 +2204,9 @@ body:not(.authenticated) .login-container {
   body.printing-agents #view-agents-modal .btn,
   body.printing-agents #view-agents-modal .btn-close-modal,
   body.printing-agents #view-agents-modal .modal-actions,
-  body.printing-agents #view-agents-modal .btn-delete-agent {
+  body.printing-agents #view-agents-modal .btn-delete-agent,
+  body.printing-agents #view-agents-modal .btn-edit-agent,
+  body.printing-agents #view-agents-modal #btn-add-agent-trigger-inside {
     display: none !important;
   }
 
@@ -2196,8 +2215,16 @@ body:not(.authenticated) .login-container {
     box-shadow: none !important;
     border: none !important;
     padding: 0 !important;
+    margin: 0 !important;
     max-width: 100% !important;
     width: 100% !important;
+  }
+
+  body.printing-agents #view-agents-modal div[style*="max-height"] {
+    max-height: none !important;
+    overflow: visible !important;
+    padding-right: 0 !important;
+    margin-top: 0.5rem !important;
   }
 
   body.printing-agents #view-agents-modal * {

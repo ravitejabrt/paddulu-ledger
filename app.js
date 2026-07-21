@@ -206,7 +206,10 @@ document.addEventListener('DOMContentLoaded', () => {
   dom.inputDate.value = today;
 
   // Load entries and agents from database
-  Promise.all([loadLedgerEntries(), loadCommissionAgents()]).then(() => {
+  Promise.all([loadLedgerEntries(), loadCommissionAgents()]).then(async () => {
+    // Sync agents with ledger entries profiles
+    await syncAgentsFromLedgerEntries();
+
     // Initial render
     if (isAuthenticated()) {
       renderApp();
@@ -683,6 +686,59 @@ async function saveCommissionAgents() {
   populateAgentSuggestions();
 }
 
+async function syncAgentsFromLedgerEntries() {
+  let updated = false;
+
+  ledgerEntries.forEach(entry => {
+    if (!entry.name) return;
+    
+    // Find matching agent
+    const matchedAgent = commissionAgents.find(a => a.name.toLowerCase() === entry.name.toLowerCase());
+    
+    if (!matchedAgent) {
+      // Register new agent
+      const newAgent = {
+        name: entry.name,
+        firmName: entry.firmName || '',
+        phone: entry.phone || '',
+        bankAccount: entry.bankAccount || '',
+        bankIfsc: entry.bankIfsc || ''
+      };
+      commissionAgents.push(newAgent);
+      updated = true;
+    } else {
+      // Enrich existing agent fields if empty but exist in ledger entry
+      let enriched = false;
+      if (!matchedAgent.firmName && entry.firmName) {
+        matchedAgent.firmName = entry.firmName;
+        enriched = true;
+      }
+      if (!matchedAgent.phone && entry.phone) {
+        matchedAgent.phone = entry.phone;
+        enriched = true;
+      }
+      if (!matchedAgent.bankAccount && entry.bankAccount) {
+        matchedAgent.bankAccount = entry.bankAccount;
+        enriched = true;
+      }
+      if (!matchedAgent.bankIfsc && entry.bankIfsc) {
+        matchedAgent.bankIfsc = entry.bankIfsc;
+        enriched = true;
+      }
+      if (enriched) {
+        updated = true;
+      }
+    }
+  });
+
+  if (updated) {
+    await saveCommissionAgents();
+    populateAgentSuggestions();
+    renderAgentsDirectory();
+    console.log('Synchronized commission agents database with ledger entries profiles.');
+  }
+}
+
 function populateAgentSuggestions() {
   if (!dom.agentSuggestions) return;
   dom.agentSuggestions.innerHTML = '';
@@ -989,14 +1045,13 @@ function renderAgentsDirectory() {
   commissionAgents.forEach((agent, idx) => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td style="padding: 0.5rem; color: var(--text-primary); font-weight: 500;">${agent.name}</td>
-      <td style="padding: 0.5rem; color: var(--text-secondary);">${agent.firmName || '-'}</td>
-      <td style="padding: 0.5rem; color: var(--text-secondary);">${agent.phone || '-'}</td>
-      <td style="padding: 0.5rem; color: var(--text-secondary);">
-        <div style="font-size: 0.72rem;">A/C: ${agent.bankAccount || '-'}</div>
-        <div style="font-size: 0.72rem; opacity: 0.8;">IFSC: ${agent.bankIfsc || '-'}</div>
+      <td style="padding: 0.5rem; color: var(--text-primary); font-weight: 500; white-space: nowrap;">${agent.name}</td>
+      <td style="padding: 0.5rem; color: var(--text-secondary); white-space: nowrap;">${agent.firmName || '-'}</td>
+      <td style="padding: 0.5rem; color: var(--text-secondary); white-space: nowrap;">${agent.phone || '-'}</td>
+      <td style="padding: 0.5rem; color: var(--text-secondary); white-space: nowrap; font-size: 0.72rem;">
+        A/C: ${agent.bankAccount || '-'} &nbsp;|&nbsp; IFSC: ${agent.bankIfsc || '-'}
       </td>
-      <td style="padding: 0.5rem; text-align: center;">
+      <td style="padding: 0.5rem; text-align: center; white-space: nowrap;">
         <div style="display: flex; align-items: center; justify-content: center; gap: 0.35rem;">
           <button type="button" class="btn-edit-agent" data-idx="${idx}" title="Edit Agent" style="background: transparent; border: none; color: var(--accent-info); cursor: pointer; padding: 0.25rem;">
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
@@ -1187,8 +1242,8 @@ function attachAddAgentModalListeners() {
         return;
       }
       const styleEl = document.createElement('style');
-      styleEl.id = 'print-portrait-override';
-      styleEl.innerHTML = `@media print { @page { size: portrait !important; margin: 8mm !important; } }`;
+      styleEl.id = 'print-landscape-override';
+      styleEl.innerHTML = `@media print { @page { size: A4 landscape !important; margin: 0 !important; } }`;
       document.head.appendChild(styleEl);
 
       document.body.classList.add('printing-agents');
