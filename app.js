@@ -174,6 +174,7 @@ const dom = {
   agentBankAccount: document.getElementById('agent-bank-account'),
   agentBankIfsc: document.getElementById('agent-bank-ifsc'),
   agentSuggestions: document.getElementById('agent-suggestions'),
+  agentModalTitle: document.getElementById('agent-modal-title'),
 
   // Commission Agent Directory Elements
   viewAgentsModal: document.getElementById('view-agents-modal'),
@@ -995,9 +996,14 @@ function renderAgentsDirectory() {
         <div style="font-size: 0.72rem; opacity: 0.8;">IFSC: ${agent.bankIfsc || '-'}</div>
       </td>
       <td style="padding: 0.5rem; text-align: center;">
-        <button type="button" class="btn-delete-agent" data-idx="${idx}" title="Delete Agent" style="background: transparent; border: none; color: var(--accent-danger); cursor: pointer; padding: 0.25rem;">
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-        </button>
+        <div style="display: flex; align-items: center; justify-content: center; gap: 0.35rem;">
+          <button type="button" class="btn-edit-agent" data-idx="${idx}" title="Edit Agent" style="background: transparent; border: none; color: var(--accent-info); cursor: pointer; padding: 0.25rem;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+          </button>
+          <button type="button" class="btn-delete-agent" data-idx="${idx}" title="Delete Agent" style="background: transparent; border: none; color: var(--accent-danger); cursor: pointer; padding: 0.25rem;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+          </button>
+        </div>
       </td>
     `;
     dom.agentsListBody.appendChild(tr);
@@ -1016,6 +1022,29 @@ function renderAgentsDirectory() {
         showToast(`Commission Agent "${agent.name}" deleted successfully.`, 'info');
         renderAgentsDirectory();
       }
+    });
+  });
+
+  // Attach edit click listeners
+  dom.agentsListBody.querySelectorAll('.btn-edit-agent').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const idx = parseInt(btn.getAttribute('data-idx'), 10);
+      const agent = commissionAgents[idx];
+      
+      dom.viewAgentsModal.close();
+      
+      if (dom.agentModalTitle) {
+        dom.agentModalTitle.textContent = 'Edit Commission Agent';
+      }
+      dom.agentName.value = agent.name;
+      dom.agentName.readOnly = true; // Lock name during editing
+      dom.agentFirm.value = agent.firmName || '';
+      dom.agentPhone.value = agent.phone || '';
+      dom.agentBankAccount.value = agent.bankAccount || '';
+      dom.agentBankIfsc.value = agent.bankIfsc || '';
+      
+      clearErrors(dom.agentForm);
+      dom.addAgentModal.showModal();
     });
   });
 }
@@ -1046,7 +1075,11 @@ function attachAddAgentModalListeners() {
   if (dom.btnAddAgentTriggerInside) {
     dom.btnAddAgentTriggerInside.addEventListener('click', () => {
       dom.viewAgentsModal.close();
+      if (dom.agentModalTitle) {
+        dom.agentModalTitle.textContent = 'Add Commission Agent';
+      }
       dom.agentName.value = '';
+      dom.agentName.readOnly = false; // Make name editable for new agents
       dom.agentFirm.value = '';
       dom.agentPhone.value = '';
       dom.agentBankAccount.value = '';
