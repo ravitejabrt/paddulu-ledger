@@ -191,6 +191,7 @@ const dom = {
 
 // --- Additional Global State ---
 let commissionAgents = [];
+let originalAgentName = '';
 
 // --- Initialization ---
 document.addEventListener('DOMContentLoaded', () => {
@@ -1036,8 +1037,9 @@ function renderAgentsDirectory() {
       if (dom.agentModalTitle) {
         dom.agentModalTitle.textContent = 'Edit Commission Agent';
       }
+      originalAgentName = agent.name;
       dom.agentName.value = agent.name;
-      dom.agentName.readOnly = true; // Lock name during editing
+      dom.agentName.readOnly = false; // Make name editable during editing
       dom.agentFirm.value = agent.firmName || '';
       dom.agentPhone.value = agent.phone || '';
       dom.agentBankAccount.value = agent.bankAccount || '';
@@ -1075,6 +1077,7 @@ function attachAddAgentModalListeners() {
   if (dom.btnAddAgentTriggerInside) {
     dom.btnAddAgentTriggerInside.addEventListener('click', () => {
       dom.viewAgentsModal.close();
+      originalAgentName = ''; // Reset state
       if (dom.agentModalTitle) {
         dom.agentModalTitle.textContent = 'Add Commission Agent';
       }
@@ -1126,6 +1129,31 @@ function attachAddAgentModalListeners() {
       const accountVal = dom.agentBankAccount.value.trim();
       const ifscVal = dom.agentBankIfsc.value.trim();
 
+      // If editing and they changed the agent's name
+      if (originalAgentName && originalAgentName.toLowerCase() !== nameVal.toLowerCase()) {
+        // Delete old agent row
+        const oldIdx = commissionAgents.findIndex(a => a.name.toLowerCase() === originalAgentName.toLowerCase());
+        if (oldIdx !== -1) {
+          commissionAgents.splice(oldIdx, 1);
+        }
+        await deleteSupabaseAgent(originalAgentName);
+
+        // Update corresponding ledger entries customer name
+        let entriesUpdated = 0;
+        ledgerEntries.forEach(entry => {
+          if (entry.name.toLowerCase() === originalAgentName.toLowerCase()) {
+            entry.name = nameVal;
+            saveSupabaseEntry(entry);
+            entriesUpdated++;
+          }
+        });
+        if (entriesUpdated > 0) {
+          saveLedgerEntries();
+          renderApp();
+          showToast(`Updated ${entriesUpdated} matching ledger entries name.`, 'info');
+        }
+      }
+
       // Check if already exists (by case-insensitive name)
       const existingIdx = commissionAgents.findIndex(a => a.name.toLowerCase() === nameVal.toLowerCase());
       const newAgent = {
@@ -1143,6 +1171,7 @@ function attachAddAgentModalListeners() {
       }
 
       await saveCommissionAgents();
+      originalAgentName = ''; // Reset state
       showToast(`Commission Agent "${nameVal}" saved successfully!`, 'success');
       dom.addAgentModal.close();
       renderAgentsDirectory();
