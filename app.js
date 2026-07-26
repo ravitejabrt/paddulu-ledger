@@ -191,7 +191,10 @@ const dom = {
 
 // --- Additional Global State ---
 let commissionAgents = [];
+let commissionAgentsLoaded = false;
 let originalAgentName = '';
+let supabaseUrl = null;
+let supabaseKey = null;
 
 // --- Initialization ---
 document.addEventListener('DOMContentLoaded', () => {
@@ -326,8 +329,8 @@ async function decryptData(ciphertextBase64, password) {
 }
 
 function initSupabase() {
-  let url = window.SUPABASE_URL || localStorage.getItem('paddulu_supabase_url');
-  let key = window.SUPABASE_ANON_KEY || localStorage.getItem('paddulu_supabase_key');
+  let url = window.SUPABASE_URL || supabaseUrl;
+  let key = window.SUPABASE_ANON_KEY || supabaseKey;
 
   if (url && (url.includes('YOUR_') || url.includes('placeholder'))) url = null;
   if (key && (key.includes('YOUR_') || key.includes('placeholder'))) key = null;
@@ -351,8 +354,8 @@ function initSupabase() {
 }
 
 function openSupabaseModal() {
-  dom.popupSupabaseUrl.value = localStorage.getItem('paddulu_supabase_url') || '';
-  dom.popupSupabaseKey.value = localStorage.getItem('paddulu_supabase_key') || '';
+  dom.popupSupabaseUrl.value = supabaseUrl || '';
+  dom.popupSupabaseKey.value = supabaseKey || '';
   dom.supabaseModal.showModal();
 }
 
@@ -391,8 +394,8 @@ function attachSupabaseListeners() {
       if (error) throw error;
 
       // Save credentials if connection test succeeds
-      localStorage.setItem('paddulu_supabase_url', urlVal);
-      localStorage.setItem('paddulu_supabase_key', keyVal);
+      supabaseUrl = urlVal;
+      supabaseKey = keyVal;
       supabaseClient = testClient;
 
       // Encrypt credentials using the standard key "1989" to safely store in public config.js
@@ -417,7 +420,8 @@ function attachSupabaseListeners() {
       closeSupabaseModal();
 
       // Reload data
-      await loadLedgerEntries();
+      await Promise.all([loadLedgerEntries(), loadCommissionAgents()]);
+      await syncAgentsFromLedgerEntries();
       renderApp();
     } catch (err) {
       console.error('Connection test failed:', err);
@@ -490,9 +494,8 @@ async function loadLedgerEntries() {
     let entries = (data || []).map(mapRowToEntry);
 
     // Auto migration fallback (if cloud database is empty, pull local backups)
-    let localData = localStorage.getItem('paddulu_ledger_entries');
     if (entries.length === 0) {
-      // 1. Try to fetch from local server data.json file database
+      // Try to fetch from local server data.json file database
       try {
         const response = await fetch('/api/entries');
         if (response.ok) {
@@ -506,23 +509,12 @@ async function loadLedgerEntries() {
         console.log('No local server database found (expected in production).');
       }
 
-      // 2. Try to fetch from localStorage
-      if (entries.length === 0 && localData) {
-        try {
-          entries = JSON.parse(localData);
-          showToast('Migrating local browser storage to Supabase...', 'info');
-        } catch (err) {
-          console.error(err);
-        }
-      }
-
       // Upload migrated items to Supabase
       if (entries.length > 0) {
         const rows = entries.map(mapEntryToRow);
         const { error: uploadError } = await supabaseClient.from('ledger_entries').upsert(rows);
         if (!uploadError) {
           showToast('Migrated all entries to cloud database!', 'success');
-          localStorage.removeItem('paddulu_ledger_entries');
         } else {
           console.error('Upload migration error:', uploadError);
         }
@@ -573,25 +565,14 @@ async function loadCommissionAgents() {
     console.log('No local server database found (expected in production).');
   }
 
-  // 2. Try local browser storage if empty
-  if (localAgentsList.length === 0) {
-    const localAgents = localStorage.getItem('commission_agents');
-    if (localAgents) {
-      try {
-        localAgentsList = JSON.parse(localAgents);
-      } catch (e) {
-        console.error(e);
-      }
-    }
-  }
-
   let finalAgents = [...localAgentsList];
 
   // 3. Try to load from Supabase if connected
   if (supabaseClient) {
     try {
       const { data, error } = await supabaseClient.from('commission_agents').select('*');
-      if (!error && data) {
+      if (error) throw error;
+      if (data) {
         const cloudAgents = data.map(row => ({
           name: row.name,
           firmName: row.firm_name,
@@ -642,10 +623,13 @@ async function loadCommissionAgents() {
           }
           finalAgents = merged;
         }
+        commissionAgentsLoaded = true;
       }
     } catch (e) {
       console.warn("Supabase commission_agents table not found or select failed.", e);
     }
+  } else {
+    commissionAgentsLoaded = true;
   }
 
   commissionAgents = finalAgents || [];
@@ -653,10 +637,7 @@ async function loadCommissionAgents() {
 }
 
 async function saveCommissionAgents() {
-  // 1. Save to local browser storage
-  localStorage.setItem('commission_agents', JSON.stringify(commissionAgents));
-
-  // 2. Save to local server /api/agents
+  // 1. Save to local server /api/agents
   try {
     await fetch('/api/agents', {
       method: 'POST',
@@ -677,9 +658,10 @@ async function saveCommissionAgents() {
         bank_account: a.bankAccount,
         bank_ifsc: a.bankIfsc
       }));
-      await supabaseClient.from('commission_agents').upsert(rows);
+      const { error } = await supabaseClient.from('commission_agents').upsert(rows);
+      if (error) throw error;
     } catch (e) {
-      console.warn("Supabase commission_agents table sync failed. Storing locally.");
+      console.warn("Supabase commission_agents table sync failed. Storing locally.", e);
     }
   }
 
@@ -687,6 +669,10 @@ async function saveCommissionAgents() {
 }
 
 async function syncAgentsFromLedgerEntries() {
+  if (supabaseClient && !commissionAgentsLoaded) {
+    console.warn('Skipping agent synchronization because commission agents have not been loaded from Supabase yet.');
+    return;
+  }
   let updated = false;
 
   ledgerEntries.forEach(entry => {
@@ -1110,9 +1096,18 @@ function attachAddAgentModalListeners() {
   if (!dom.btnTriggerAddAgent || !dom.addAgentModal || !dom.viewAgentsModal) return;
 
   // Open View Directory Modal
-  dom.btnTriggerAddAgent.addEventListener('click', () => {
+  dom.btnTriggerAddAgent.addEventListener('click', async () => {
+    // Render in-memory agents immediately
     renderAgentsDirectory();
     dom.viewAgentsModal.showModal();
+    
+    // Fetch latest agents in the background and update layout
+    try {
+      await loadCommissionAgents();
+      renderAgentsDirectory();
+    } catch (err) {
+      console.error('Error auto-refreshing commission agents directory:', err);
+    }
   });
 
   // Close View Directory Modal
@@ -2141,15 +2136,9 @@ function exportToCSV(exportSelected = false) {
 
 function initAuthentication() {
   const isSessionLoggedIn = sessionStorage.getItem('paddulu_auth_logged_in') === 'true';
-  const isLocalLoggedIn = localStorage.getItem('paddulu_auth_logged_in') === 'true';
-  const isRemember = localStorage.getItem('paddulu_auth_remember') === 'true';
 
-  if (isSessionLoggedIn || (isRemember && isLocalLoggedIn)) {
+  if (isSessionLoggedIn) {
     document.body.classList.add('authenticated');
-    // Save session storage status in case it was loaded via localStorage
-    if (isRemember && isLocalLoggedIn) {
-      sessionStorage.setItem('paddulu_auth_logged_in', 'true');
-    }
   } else {
     document.body.classList.remove('authenticated');
   }
@@ -2208,21 +2197,13 @@ function attachAuthListeners() {
         // Success auth
         sessionStorage.setItem('paddulu_auth_logged_in', 'true');
         
-        if (dom.loginRemember.checked) {
-          localStorage.setItem('paddulu_auth_logged_in', 'true');
-          localStorage.setItem('paddulu_auth_remember', 'true');
-        } else {
-          localStorage.removeItem('paddulu_auth_logged_in');
-          localStorage.removeItem('paddulu_auth_remember');
-        }
-
         // Try decrypting credentials with entered password on new device login
         if (window.SUPABASE_URL_ENCRYPTED && window.SUPABASE_ANON_KEY_ENCRYPTED) {
           const decUrl = await decryptData(window.SUPABASE_URL_ENCRYPTED, passwordInput);
           const decKey = await decryptData(window.SUPABASE_ANON_KEY_ENCRYPTED, passwordInput);
           if (decUrl && decKey) {
-            localStorage.setItem('paddulu_supabase_url', decUrl);
-            localStorage.setItem('paddulu_supabase_key', decKey);
+            supabaseUrl = decUrl;
+            supabaseKey = decKey;
             initSupabase();
           }
         }
@@ -2230,7 +2211,8 @@ function attachAuthListeners() {
         document.body.classList.add('authenticated');
         
         // Load and render app dashboard
-        loadLedgerEntries().then(() => {
+        Promise.all([loadLedgerEntries(), loadCommissionAgents()]).then(async () => {
+          await syncAgentsFromLedgerEntries();
           renderApp();
         });
 
@@ -2259,10 +2241,13 @@ function attachAuthListeners() {
     if (confirm('Are you sure you want to log out from BRT Paddulu Ledger?')) {
       // Clear session & localStorage flags
       sessionStorage.removeItem('paddulu_auth_logged_in');
-      localStorage.removeItem('paddulu_auth_logged_in');
-      localStorage.removeItem('paddulu_auth_remember');
-      localStorage.removeItem('paddulu_supabase_url');
-      localStorage.removeItem('paddulu_supabase_key');
+      localStorage.clear();
+      
+      supabaseUrl = null;
+      supabaseKey = null;
+      supabaseClient = null;
+      commissionAgents = [];
+      commissionAgentsLoaded = false;
 
       // Clear layout
       document.body.classList.remove('authenticated');
