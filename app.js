@@ -916,6 +916,14 @@ WHERE id = 'main_store';`;
     if (!remoteData) return;
     if (Array.isArray(remoteData.clients)) {
       state.clients = remoteData.clients;
+      // Ensure all payments have unique identifiers
+      state.clients.forEach(c => {
+        if (Array.isArray(c.payments)) {
+          c.payments.forEach((p, idx) => {
+            if (!p.id) p.id = 'pay_' + (p.createdAt ? new Date(p.createdAt).getTime() : Date.now()) + '_' + idx;
+          });
+        }
+      });
     } else {
       state.clients = [];
     }
@@ -1132,6 +1140,15 @@ WHERE id = 'main_store';`;
         const raw = localStorage.getItem(STORAGE_KEY);
         if (raw) {
           state.clients = JSON.parse(raw);
+          if (Array.isArray(state.clients)) {
+            state.clients.forEach(c => {
+              if (Array.isArray(c.payments)) {
+                c.payments.forEach((p, idx) => {
+                  if (!p.id) p.id = 'pay_' + (p.createdAt ? new Date(p.createdAt).getTime() : Date.now()) + '_' + idx;
+                });
+              }
+            });
+          }
         } else {
           state.clients = [];
         }
@@ -1998,6 +2015,9 @@ WHERE id = 'main_store';`;
         paymentsEmpty.classList.remove('hidden');
       } else {
         paymentsEmpty.classList.add('hidden');
+        (client.payments || []).forEach((p, idx) => {
+          if (!p.id) p.id = 'pay_' + (p.createdAt ? new Date(p.createdAt).getTime() : Date.now()) + '_' + idx;
+        });
         const reversedPayments = [...client.payments].reverse();
 
         paymentsTbody.innerHTML = reversedPayments
@@ -2906,14 +2926,24 @@ WHERE id = 'main_store';`;
 
   // Edit Payment Transaction
   function openEditPaymentModal(clientId, paymentId) {
-    const client = state.clients.find(c => c.id === clientId);
+    const cId = clientId || state.activeClientId;
+    const client = state.clients.find(c => String(c.id) === String(cId));
     if (!client || !client.payments) return;
 
-    const payment = client.payments.find(p => p.id === paymentId);
+    if (Array.isArray(client.payments)) {
+      client.payments.forEach((p, idx) => {
+        if (!p.id) p.id = 'pay_' + (p.createdAt ? new Date(p.createdAt).getTime() : Date.now()) + '_' + idx;
+      });
+    }
+
+    let payment = client.payments.find(p => String(p.id) === String(paymentId));
+    if (!payment && client.payments.length > 0) {
+      payment = client.payments.find((p, idx) => String(idx) === String(paymentId)) || client.payments[client.payments.length - 1];
+    }
     if (!payment) return;
 
-    document.getElementById('edit-payment-client-id').value = clientId;
-    document.getElementById('edit-payment-id').value = paymentId;
+    document.getElementById('edit-payment-client-id').value = client.id;
+    document.getElementById('edit-payment-id').value = payment.id;
 
     const nameEl = document.getElementById('edit-payment-client-name');
     if (nameEl) {
@@ -3019,14 +3049,25 @@ WHERE id = 'main_store';`;
   }
 
   function handleDeletePayment(clientId, paymentId) {
-    const client = state.clients.find(c => c.id === clientId);
-    if (!client) return;
+    const cId = clientId || state.activeClientId;
+    const client = state.clients.find(c => String(c.id) === String(cId));
+    if (!client || !client.payments) return;
+
+    if (Array.isArray(client.payments)) {
+      client.payments.forEach((p, idx) => {
+        if (!p.id) p.id = 'pay_' + (p.createdAt ? new Date(p.createdAt).getTime() : Date.now()) + '_' + idx;
+      });
+    }
 
     if (confirm('Are you sure you want to delete this payment record? Balance will be updated accordingly.')) {
-      client.payments = client.payments.filter(p => p.id !== paymentId);
+      let filtered = client.payments.filter(p => String(p.id) !== String(paymentId));
+      if (filtered.length === client.payments.length && !isNaN(Number(paymentId))) {
+        filtered = client.payments.filter((_, idx) => String(idx) !== String(paymentId));
+      }
+      client.payments = filtered;
       saveData();
       showToast('Payment record deleted');
-      renderClientDetail(clientId);
+      renderClientDetail(client.id);
     }
   }
 
@@ -3184,23 +3225,53 @@ WHERE id = 'main_store';`;
     openModal('printStatementModal');
   }
 
+  // Helper for WhatsApp Phone Normalization
+  function normalizeWhatsAppPhone(rawPhone) {
+    if (!rawPhone) return '';
+    let digits = String(rawPhone).replace(/\D/g, '');
+    if (!digits) return '';
+    if (digits.length === 11 && digits.startsWith('0')) {
+      digits = digits.slice(1);
+    }
+    if (digits.length === 10) {
+      digits = '91' + digits;
+    }
+    return digits;
+  }
+
   // Active receipt context for modal WhatsApp button
   let activeReceiptContext = null;
 
   // ==================== PAYMENT RECEIPT / INVOICE PRINT ====================
   function printPaymentReceipt(clientId, paymentId) {
-    const client = state.clients.find(c => c.id === clientId);
-    if (!client) return;
+    const cId = clientId || state.activeClientId;
+    const client = (state.clients || []).find(c => String(c.id) === String(cId));
+    if (!client) {
+      showToast('Client not found', true);
+      return;
+    }
 
-    const payment = (client.payments || []).find(p => p.id === paymentId);
-    if (!payment) return;
+    if (Array.isArray(client.payments)) {
+      client.payments.forEach((p, idx) => {
+        if (!p.id) p.id = 'pay_' + (p.createdAt ? new Date(p.createdAt).getTime() : Date.now()) + '_' + idx;
+      });
+    }
 
-    activeReceiptContext = { clientId, paymentId };
+    let payment = (client.payments || []).find(p => String(p.id) === String(paymentId));
+    if (!payment && client.payments && client.payments.length > 0) {
+      payment = client.payments.find((p, idx) => String(idx) === String(paymentId)) || client.payments[client.payments.length - 1];
+    }
+    if (!payment) {
+      showToast('Payment record not found', true);
+      return;
+    }
+
+    activeReceiptContext = { clientId: client.id, paymentId: payment.id };
 
     const container = document.getElementById('printable-receipt-content');
     if (!container) return;
 
-    const ledger = calculateClientLedger(client);
+    const ledger = calculateClientLedger(client) || { totalBilled: 0, totalPaid: 0, finalBalance: 0 };
     const hasDiscount = Number(payment.discount || 0) > 0;
     const paidAmount = Number(payment.amount || 0);
     const discountAmount = Number(payment.discount || 0);
@@ -3349,19 +3420,31 @@ WHERE id = 'main_store';`;
 
   // ==================== WHATSAPP PAYMENT MESSAGE ====================
   function sendPaymentWhatsApp(clientId, paymentId) {
-    const client = state.clients.find(c => c.id === clientId);
+    const cId = clientId || state.activeClientId;
+    const client = (state.clients || []).find(c => String(c.id) === String(cId));
     if (!client) {
       showToast('Client not found', true);
       return;
     }
 
-    const payment = (client.payments || []).find(p => p.id === paymentId);
+    if (Array.isArray(client.payments)) {
+      client.payments.forEach((p, idx) => {
+        if (!p.id) p.id = 'pay_' + (p.createdAt ? new Date(p.createdAt).getTime() : Date.now()) + '_' + idx;
+      });
+    }
+
+    let payment = (client.payments || []).find(p => String(p.id) === String(paymentId));
+    if (!payment && client.payments && client.payments.length > 0) {
+      payment = client.payments.find((p, idx) => String(idx) === String(paymentId)) || client.payments[client.payments.length - 1];
+    }
     if (!payment) {
       showToast('Payment record not found', true);
       return;
     }
 
-    const ledger = calculateClientLedger(client);
+    activeReceiptContext = { clientId: client.id, paymentId: payment.id };
+
+    const ledger = calculateClientLedger(client) || { totalBilled: 0, totalPaid: 0, finalBalance: 0 };
     const hasDiscount = Number(payment.discount || 0) > 0;
     const receiptNo = payment.reference && payment.reference.trim() !== '--'
       ? payment.reference.trim()
@@ -3402,18 +3485,34 @@ WHERE id = 'main_store';`;
     msg += `_Thank you for your payment!_\n`;
     msg += `_${businessTitle}_`;
 
-    // Clean phone number for WhatsApp deep link
-    let phoneDigits = (client.phone || '').replace(/\D/g, '');
-    if (phoneDigits.length === 10) {
-      phoneDigits = '91' + phoneDigits; // Prepend India country code if 10 digits
+    let phoneDigits = normalizeWhatsAppPhone(client.phone);
+    if (!phoneDigits) {
+      const entered = prompt(
+        `No phone number found for ${client.name || 'this client'}.\nPlease enter WhatsApp number (10 digits):`,
+        ''
+      );
+      if (entered === null) return; // User cancelled
+      phoneDigits = normalizeWhatsAppPhone(entered);
+      if (phoneDigits) {
+        client.phone = entered.trim();
+        saveData();
+      }
     }
 
     const encodedText = encodeURIComponent(msg);
     const waUrl = phoneDigits
-      ? `https://wa.me/${phoneDigits}?text=${encodedText}`
-      : `https://wa.me/?text=${encodedText}`;
+      ? `https://api.whatsapp.com/send?phone=${phoneDigits}&text=${encodedText}`
+      : `https://api.whatsapp.com/send?text=${encodedText}`;
 
-    window.open(waUrl, '_blank');
+    // Reliable cross-browser opening to prevent popup blocking
+    const a = document.createElement('a');
+    a.href = waUrl;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => a.remove(), 100);
+
     showToast(phoneDigits ? `Opening WhatsApp for ${client.name || 'client'}...` : 'Opening WhatsApp with payment receipt...');
   }
 
